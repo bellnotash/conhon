@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bảng Tính Tiền - Xuân Giáp Ất Tỵ 2025</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+    />
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+  </head>
+  <body>
+    <div class="loading-overlay">
+      <div class="loading-spinner"></div>
+    </div>
+    <div class="notification" id="notification"></div>
+    <div class="container">
+      <div class="header">
+        <img
+          src="images/lantern.png"
+          alt="Đèn lồng"
+          class="lantern lantern-left"
+        />
+        <img
+          src="images/lantern.png"
+          alt="Đèn lồng"
+          class="lantern lantern-right"
+        />
+        <h1>CỔ NHƠN 2025 - XUÂN ẤT TỴ</h1>
+      </div>
+
+      <!-- Thêm form ghi sổ -->
+      <div class="ledger-form">
+        <h2>Ghi Sổ</h2>
+        <div class="form-group">
+          <label>Ngày:</label>
+          <input type="date" id="ledgerDate" class="ledger-input" />
+        </div>
+        <div class="form-group">
+          <label>Buổi:</label>
+          <div class="session-selector">
+            <label class="session-option">
+              <input type="radio" name="session" value="Sáng" checked />
+              <span class="session-label">
+                <i class="fas fa-sun"></i>
+                Sáng
+              </span>
+            </label>
+            <label class="session-option">
+              <input type="radio" name="session" value="Chiều" />
+              <span class="session-label">
+                <i class="fas fa-moon"></i>
+                Chiều
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Của:</label>
+          <input
+            type="text"
+            id="ledgerPerson"
+            class="ledger-input"
+            placeholder="Nhập tên người"
+          />
+        </div>
+        <div class="form-group">
+          <label>Nội dung:</label>
+          <textarea
+            id="ledgerContent"
+            class="ledger-input"
+            placeholder="Ví dụ: cá trắng 50k, con ốc 100k"
+          ></textarea>
+        </div>
+        <div class="form-group">
+          <label>Tổng cộng:</label>
+          <div id="ledgerTotal" class="ledger-total">0 đ</div>
+        </div>
+        <div class="ledger-btn-container">
+          <button onclick="processLedgerEntry()" class="ledger-btn">
+            <i class="fas fa-book"></i>
+            Ghi vào sổ
+          </button>
+        </div>
+      </div>
+
+      <!-- Hiển thị lịch sử ghi sổ -->
+      <div class="ledger-history">
+        <h2>Lịch Sử Ghi Sổ</h2>
+        <div id="ledgerEntries"></div>
+      </div>
+
+      <!-- Thêm h2 trước grid -->
+      <div class="grid-section">
+        <h2 class="section-title">Danh Sách Các Con Vật</h2>
+        <div class="search-section">
+          <div class="search-box">
+            <input
+              type="text"
+              id="searchInput"
+              class="search-input"
+              placeholder="Tìm kiếm theo tên hoặc loại con vật..."
+            />
+            <i class="fas fa-search search-icon"></i>
+          </div>
+        </div>
+        <div class="grid">
+          <!-- Grid sẽ được tạo bằng JavaScript -->
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="button-group">
+          <button onclick="calculateTotal()" class="calculate-btn">
+            <i class="fas fa-calculator"></i>
+            Tính Tổng Tất Cả
+          </button>
+          <button onclick="exportHistory()" class="export-btn">
+            <i class="fas fa-file-export"></i>
+            Xuất Lịch Sử
+          </button>
+          <button onclick="exportAsImage()" class="export-image-btn">
+            <i class="fas fa-image"></i>
+            Xuất Ảnh
+          </button>
+          <button onclick="clearAllData()" class="clear-btn">
+            <i class="fas fa-trash-alt"></i>
+            Xóa Dữ Liệu
+          </button>
+        </div>
+        <div id="totalAmount">Tổng: 0 đ</div>
+      </div>
+    </div>
+    <script src="script.js"></script>
+  </body>
+</html>
