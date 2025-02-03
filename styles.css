@@ -998,10 +998,11 @@ textarea.ledger-input {
 .search-section {
   margin: 0 auto 25px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
   width: 100%;
   max-width: 800px;
-  position: relative;
 }
 
 .search-box {
@@ -1114,4 +1115,126 @@ textarea.ledger-input {
   padding: 15px;
   background: rgba(255, 77, 77, 0.1);
   border-radius: 8px;
+}
+
+/* Thêm style cho filter buttons */
+.filter-buttons {
+  display: flex;
+  gap: 15px;
+  margin-top: 5px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.filter-btn {
+  padding: 8px 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 20px;
+  background: white;
+  color: #666;
+  cursor: pointer;
+  font-size: 0.95em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+  min-width: 120px;
+  justify-content: center;
+}
+
+.filter-btn i {
+  font-size: 1em;
+}
+
+.filter-btn:hover {
+  border-color: var(--gold-color);
+  color: var(--lucky-red);
+  transform: translateY(-2px);
+}
+
+.filter-btn.active {
+  background: var(--gold-color);
+  border-color: var(--gold-color);
+  color: #333;
+  font-weight: 500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .search-section {
+    padding: 0 15px;
+  }
+
+  .filter-buttons {
+    gap: 10px;
+  }
+
+  .filter-btn {
+    font-size: 0.9em;
+    padding: 6px 15px;
+    min-width: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .filter-buttons {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .filter-btn {
+    width: calc(50% - 10px);
+    min-width: 0;
+  }
+}
+
+/* Style cho nút sắp xếp */
+.sort-btn {
+  padding: 8px 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 20px;
+  background: white;
+  color: #666;
+  cursor: pointer;
+  font-size: 0.95em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+  min-width: 120px;
+  justify-content: center;
+}
+
+.sort-btn i {
+  font-size: 1em;
+}
+
+.sort-btn:hover {
+  border-color: var(--gold-color);
+  color: var(--lucky-red);
+  transform: translateY(-2px);
+}
+
+.sort-btn.active {
+  background: #4caf50;
+  border-color: #4caf50;
+  color: white;
+  font-weight: 500;
+}
+
+/* Responsive adjustment */
+@media (max-width: 768px) {
+  .sort-btn {
+    font-size: 0.9em;
+    padding: 6px 15px;
+    min-width: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .sort-btn {
+    width: calc(50% - 10px);
+    min-width: 0;
+  }
 }

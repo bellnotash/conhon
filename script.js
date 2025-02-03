@@ -218,7 +218,201 @@ function calculateTotal() {
   ).textContent = `Tổng: ${total.toLocaleString("vi-VN")} đ`;
 }
 
-// Cập nhật hàm processLedgerEntry để lấy giá trị radio button
+// Thêm biến để lưu trạng thái lọc và sắp xếp
+let currentFilter = "all";
+let currentSort = null;
+let currentSearch = "";
+
+// Tạo index tìm kiếm khi khởi tạo ứng dụng
+let searchIndex = [];
+
+function initializeSearchIndex() {
+  searchIndex = animals.map((animal, index) => ({
+    index,
+    name: animal.name.toLowerCase(),
+    type: animal.type.toLowerCase(),
+    id: animal.id,
+    fullText: `${animal.name} ${animal.type} ${animal.id}`.toLowerCase(),
+  }));
+}
+
+// Hàm lấy tổng tiền của cell
+function getCellTotal(cell) {
+  const itemTotal = cell.querySelector(".item-total");
+  return parseInt(itemTotal.dataset.total || 0);
+}
+
+// Hàm kiểm tra trạng thái ghi của cell
+function isCellRecorded(cell) {
+  return getCellTotal(cell) !== 0;
+}
+
+// Hàm áp dụng điều kiện tìm kiếm
+function matchesSearch(searchData, searchText) {
+  if (!searchText) return true;
+  return (
+    searchData.name === searchText ||
+    searchData.type === searchText ||
+    searchData.id === searchText ||
+    searchData.name.startsWith(searchText) ||
+    searchData.type.startsWith(searchText) ||
+    searchData.fullText.includes(searchText)
+  );
+}
+
+// Hàm áp dụng điều kiện lọc
+function matchesFilter(cell, filter) {
+  if (filter === "all") return true;
+  const isRecorded = isCellRecorded(cell);
+  return (
+    (filter === "recorded" && isRecorded) ||
+    (filter === "unrecorded" && !isRecorded)
+  );
+}
+
+// Hàm sắp xếp cells
+function sortCells(cells, sortType) {
+  if (!sortType) return cells;
+  return [...cells].sort((a, b) => {
+    const totalA = getCellTotal(a);
+    const totalB = getCellTotal(b);
+    return sortType === "asc" ? totalA - totalB : totalB - totalA;
+  });
+}
+
+// Cập nhật hàm updateGrid để xử lý tốt hơn việc sắp xếp và lọc
+function updateGrid() {
+  const cells = Array.from(document.querySelectorAll(".cell"));
+  const grid = document.querySelector(".grid");
+
+  // Tạo bản sao của cells để không ảnh hưởng đến mảng gốc
+  const originalOrder = [...cells];
+
+  // Lọc cells theo điều kiện tìm kiếm và filter
+  const visibleCells = cells.filter((cell, index) => {
+    const searchData = searchIndex[index];
+    return (
+      matchesSearch(searchData, currentSearch) &&
+      matchesFilter(cell, currentFilter)
+    );
+  });
+
+  // Sắp xếp cells nếu cần
+  const sortedCells = sortCells(visibleCells, currentSort);
+
+  // Khôi phục thứ tự ban đầu của grid
+  while (grid.firstChild) {
+    grid.removeChild(grid.firstChild);
+  }
+
+  if (currentSort) {
+    // Nếu đang sắp xếp, thêm cells đã sắp xếp
+    sortedCells.forEach((cell) => {
+      grid.appendChild(cell);
+      updateCellVisibility(cell, true);
+    });
+
+    // Thêm các cells bị ẩn vào cuối
+    originalOrder.forEach((cell) => {
+      if (!sortedCells.includes(cell)) {
+        grid.appendChild(cell);
+        updateCellVisibility(cell, false);
+      }
+    });
+  } else {
+    // Nếu không sắp xếp, giữ nguyên thứ tự ban đầu
+    originalOrder.forEach((cell) => {
+      grid.appendChild(cell);
+      const isVisible = visibleCells.includes(cell);
+      updateCellVisibility(cell, isVisible);
+    });
+  }
+}
+
+// Cập nhật hàm updateCellVisibility để xử lý hiển thị mượt mà hơn
+function updateCellVisibility(cell, visible) {
+  if (visible) {
+    cell.style.display = "";
+    // Đợi một frame để đảm bảo display đã được áp dụng
+    requestAnimationFrame(() => {
+      cell.style.opacity = "1";
+    });
+  } else {
+    cell.style.opacity = "0";
+    // Đợi animation kết thúc trước khi ẩn
+    cell.addEventListener(
+      "transitionend",
+      function hide() {
+        if (cell.style.opacity === "0") {
+          cell.style.display = "none";
+        }
+        cell.removeEventListener("transitionend", hide);
+      },
+      { once: true }
+    );
+  }
+}
+
+// Cập nhật hàm tìm kiếm với debounce
+const debouncedSearch = debounce((searchText) => {
+  currentSearch = searchText.toLowerCase().trim();
+  updateGrid();
+}, 300);
+
+// Cập nhật event listeners
+document.addEventListener("DOMContentLoaded", () => {
+  // Khởi tạo grid
+  createGrid();
+
+  // Set ngày mặc định là ngày hiện tại
+  document.getElementById("ledgerDate").value = getCurrentDate();
+
+  // Tải dữ liệu đã lưu
+  loadDataFromLocalStorage();
+
+  // Khởi tạo search index
+  initializeSearchIndex();
+
+  // Xử lý sự kiện tìm kiếm
+  const searchInput = document.getElementById("searchInput");
+  searchInput.addEventListener("input", (e) => {
+    debouncedSearch(e.target.value);
+  });
+
+  // Xử lý sự kiện filter
+  const filterButtons = document.querySelectorAll(".filter-btn");
+  filterButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      filterButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentFilter = btn.dataset.filter;
+      updateGrid();
+    });
+  });
+
+  // Xử lý sự kiện sắp xếp
+  const sortButtons = document.querySelectorAll(".sort-btn");
+  sortButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      sortButtons.forEach((b) => b.classList.remove("active"));
+
+      if (currentSort === btn.dataset.sort) {
+        currentSort = null;
+        btn.classList.remove("active");
+      } else {
+        currentSort = btn.dataset.sort;
+        btn.classList.add("active");
+      }
+
+      updateGrid();
+    });
+  });
+
+  // Cập nhật placeholder
+  searchInput.placeholder = "Nhập tên, loại hoặc số thứ tự con vật...";
+});
+
+// Cập nhật processLedgerEntry
 function processLedgerEntry() {
   const date = document.getElementById("ledgerDate").value;
   const session = document.querySelector('input[name="session"]:checked').value;
@@ -238,7 +432,6 @@ function processLedgerEntry() {
     const { animal, amount } = entry;
     total += amount;
 
-    // Cập nhật số tiền vào ô tương ứng
     if (animalNameToIndex.hasOwnProperty(animal)) {
       const index = animalNameToIndex[animal];
       const cell = document.querySelectorAll(".cell")[index];
@@ -246,11 +439,9 @@ function processLedgerEntry() {
       const currentTotal = parseInt(itemTotal.dataset.total || 0);
       const newTotal = currentTotal + amount;
 
-      // Cập nhật tổng tiền của ô
       itemTotal.dataset.total = newTotal;
       itemTotal.textContent = `Tổng: ${newTotal.toLocaleString("vi-VN")} đ`;
 
-      // Thêm vào lịch sử của ô
       const currentTime = new Date().toLocaleString("vi-VN");
       cellHistory[index].push({
         time: currentTime,
@@ -258,16 +449,13 @@ function processLedgerEntry() {
         amount: amount,
       });
 
-      // Cập nhật hiển thị lịch sử
       const history = cell.querySelector(".history");
       updateHistory(history, cellHistory[index]);
 
-      // Cập nhật tổng cột
       calculateColumnTotal(index % 6);
     }
   });
 
-  // Thêm vào lịch sử ghi sổ
   addToLedgerHistory({
     date,
     session,
@@ -276,17 +464,17 @@ function processLedgerEntry() {
     total,
   });
 
-  // Reset form
   document.getElementById("ledgerContent").value = "";
   document.getElementById("ledgerTotal").textContent = "0 đ";
 
-  // Thêm dòng này ở cuối hàm
   saveDataToLocalStorage();
-
   showNotification("Đã ghi sổ thành công!");
+
+  // Cập nhật grid sau khi ghi sổ
+  updateGrid();
 }
 
-// Hàm phân tích nội dung ghi sổ
+// Thêm hàm phân tích nội dung ghi sổ
 function parseContent(content) {
   const entries = [];
   const patterns = content
@@ -348,26 +536,6 @@ document.getElementById("ledgerContent").addEventListener("input", function () {
   document.getElementById("ledgerTotal").textContent = `${total.toLocaleString(
     "vi-VN"
   )} đ`;
-});
-
-// Cập nhật hàm createGrid để thêm sự kiện DOMContentLoaded
-document.addEventListener("DOMContentLoaded", () => {
-  // Khởi tạo grid
-  createGrid();
-
-  // Set ngày mặc định là ngày hiện tại
-  document.getElementById("ledgerDate").value = getCurrentDate();
-
-  // Tải dữ liệu đã lưu
-  loadDataFromLocalStorage();
-
-  // Khởi tạo search index
-  initializeSearchIndex();
-
-  // Thêm event listener với debounce
-  const searchInput = document.getElementById("searchInput");
-  const debouncedSearch = debounce(searchAnimals, 300);
-  searchInput.addEventListener("input", debouncedSearch);
 });
 
 // Thêm hàm xuất lịch sử
@@ -555,75 +723,6 @@ function animateValue(element, start, end, duration) {
   };
 
   animate();
-}
-
-// Tạo index tìm kiếm khi khởi tạo ứng dụng
-let searchIndex = [];
-
-function initializeSearchIndex() {
-  searchIndex = animals.map((animal, index) => ({
-    index,
-    searchText: `${animal.name} ${animal.type} ${animal.id}`.toLowerCase(),
-    tokens: `${animal.name} ${animal.type} ${animal.id}`
-      .toLowerCase()
-      .split(/[\s-]+/)
-      .filter((token) => token.length > 1),
-  }));
-}
-
-// Tối ưu hàm tìm kiếm
-function searchAnimals() {
-  const searchInput = document.getElementById("searchInput");
-  const searchText = searchInput.value.toLowerCase().trim();
-  const cells = document.querySelectorAll(".cell");
-
-  // Nếu không có từ khóa tìm kiếm, hiển thị tất cả
-  if (!searchText) {
-    cells.forEach((cell) => {
-      cell.style.display = "";
-      cell.style.opacity = "1";
-    });
-    return;
-  }
-
-  // Tách từ khóa tìm kiếm thành tokens
-  const searchTokens = searchText
-    .split(/[\s-]+/)
-    .filter((token) => token.length > 1);
-
-  // Tìm kiếm qua index
-  const results = searchIndex.filter((item) =>
-    searchTokens.every(
-      (token) =>
-        // Kiểm tra match đầu từ hoặc match toàn bộ
-        item.tokens.some((t) => t.startsWith(token)) ||
-        item.searchText.includes(token)
-    )
-  );
-
-  // Cập nhật UI
-  requestAnimationFrame(() => {
-    cells.forEach((cell, index) => {
-      const isMatch = results.some((r) => r.index === index);
-
-      if (isMatch) {
-        cell.style.display = "";
-        requestAnimationFrame(() => {
-          cell.style.opacity = "1";
-        });
-      } else {
-        cell.style.opacity = "0";
-        cell.addEventListener(
-          "transitionend",
-          function hide() {
-            cell.style.display = "none";
-            cell.removeEventListener("transitionend", hide);
-          },
-          { once: true }
-        );
-      }
-    });
-  });
 }
 
 // Thêm debounce để tránh gọi hàm quá nhiều lần
