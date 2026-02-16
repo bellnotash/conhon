@@ -118,6 +118,18 @@
               <datalist id="personSuggestions"></datalist>
             </div>
             <div class="form-row">
+              <label><i class="fas fa-store"></i> Người bán</label>
+              <input
+                type="text"
+                id="ledgerSeller"
+                class="form-control"
+                placeholder="Tên người bán"
+                list="sellerSuggestions"
+                autocomplete="off"
+              />
+              <datalist id="sellerSuggestions"></datalist>
+            </div>
+            <div class="form-row">
               <label><i class="far fa-edit"></i> Nội dung</label>
               <textarea
                 id="ledgerContent"
@@ -164,6 +176,19 @@
         </div>
 
         <div class="tab-panel" id="historyTab">
+          <!-- Seller filter + summary -->
+          <div class="seller-filter-bar">
+            <div class="filter-row">
+              <label><i class="fas fa-filter"></i> Lọc người bán:</label>
+              <select id="sellerFilter" class="form-control filter-select" onchange="filterBySeller()">
+                <option value="">-- Tất cả --</option>
+              </select>
+            </div>
+          </div>
+          <div class="seller-summary card" id="sellerSummaryCard" style="display:none;">
+            <div class="card-header"><i class="fas fa-chart-pie"></i> Tổng Theo Người Bán</div>
+            <div class="card-body" id="sellerSummaryBody"></div>
+          </div>
           <div class="card card-history">
             <div class="card-header"><i class="fas fa-history"></i> Lịch Sử Ghi Sổ</div>
             <div class="card-body" id="ledgerEntries"></div>
@@ -171,6 +196,56 @@
         </div>
       </section>
     </main>
+
+    <!-- Edit Modal -->
+    <div class="modal-overlay" id="editModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-edit"></i> Sửa Ghi Sổ</h3>
+          <button class="modal-close" onclick="closeEditModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="editEntryId" />
+          <div class="form-row">
+            <label><i class="far fa-calendar-alt"></i> Ngày</label>
+            <input type="date" id="editDate" class="form-control" />
+          </div>
+          <div class="form-row">
+            <label><i class="far fa-clock"></i> Buổi</label>
+            <div class="session-selector">
+              <label class="session-chip">
+                <input type="radio" name="editSession" value="Sáng" checked />
+                <span><i class="fas fa-sun"></i> Sáng</span>
+              </label>
+              <label class="session-chip">
+                <input type="radio" name="editSession" value="Chiều" />
+                <span><i class="fas fa-moon"></i> Chiều</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <label><i class="far fa-user"></i> Của</label>
+            <input type="text" id="editPerson" class="form-control" placeholder="Tên người mua" />
+          </div>
+          <div class="form-row">
+            <label><i class="fas fa-store"></i> Người bán</label>
+            <input type="text" id="editSeller" class="form-control" placeholder="Tên người bán" />
+          </div>
+          <div class="form-row">
+            <label><i class="far fa-edit"></i> Nội dung</label>
+            <textarea id="editContent" class="form-control" rows="3" placeholder="VD: cá trắng 50k, ốc 100k"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-modal btn-modal-cancel" onclick="closeEditModal()">
+            <i class="fas fa-times"></i> Hủy
+          </button>
+          <button class="btn-modal btn-modal-save" onclick="saveEditedEntry()">
+            <i class="fas fa-save"></i> Lưu thay đổi
+          </button>
+        </div>
+      </div>
+    </div>
 
     <script src="script.js"></script>
   </body>

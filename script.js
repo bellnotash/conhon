@@ -175,10 +175,12 @@ function performUndo() {
       }
     });
     // Xóa ledger entry đầu tiên (mới nhất)
-    const ledgerEntries = document.getElementById("ledgerEntries");
-    if (ledgerEntries.firstElementChild) {
-      ledgerEntries.removeChild(ledgerEntries.firstElementChild);
+    if (ledgerData.length > 0) {
+      ledgerData.shift();
     }
+    renderLedgerEntries();
+    updateSellerSummary();
+    updateSellerFilter();
     calculateTotal();
     saveDataToLocalStorage();
     showNotification("Đã hoàn tác ghi sổ!");
@@ -205,6 +207,30 @@ function updatePersonSuggestions() {
     .map((p) => `<option value="${p}">`)
     .join("");
 }
+
+// ===== TRACKING NGƯỜI BÁN GẦN NHẤT =====
+let recentSellers = JSON.parse(localStorage.getItem("recentSellers") || "[]");
+
+function addRecentSeller(name) {
+  if (!name) return;
+  recentSellers = recentSellers.filter((s) => s !== name);
+  recentSellers.unshift(name);
+  if (recentSellers.length > 10) recentSellers.pop();
+  localStorage.setItem("recentSellers", JSON.stringify(recentSellers));
+  updateSellerSuggestions();
+}
+
+function updateSellerSuggestions() {
+  const datalist = document.getElementById("sellerSuggestions");
+  if (!datalist) return;
+  datalist.innerHTML = recentSellers
+    .map((s) => `<option value="${s}">`)
+    .join("");
+}
+
+// ===== DỮ LIỆU GHI SỔ CÓ CẤU TRÚC =====
+let ledgerData = [];
+let nextEntryId = 1;
 
 // ===== CẬP NHẬT BADGE LẦN CUỐI =====
 function updateLastUpdateBadge() {
@@ -347,6 +373,7 @@ function processLedgerEntry() {
   const date = document.getElementById("ledgerDate").value;
   const session = document.querySelector('input[name="session"]:checked').value;
   const person = document.getElementById("ledgerPerson").value;
+  const seller = document.getElementById("ledgerSeller").value;
   const content = document.getElementById("ledgerContent").value;
 
   if (!date || !person || !content) {
@@ -389,6 +416,7 @@ function processLedgerEntry() {
         session: session,
         amount: amount,
         person: person,
+        seller: seller,
       });
 
       // Cập nhật hiển thị lịch sử
@@ -400,17 +428,26 @@ function processLedgerEntry() {
     }
   });
 
-  // Thêm vào lịch sử ghi sổ
-  addToLedgerHistory({
+  // Thêm vào dữ liệu ghi sổ
+  const entryRecord = {
+    id: nextEntryId++,
     date,
     session,
     person,
+    seller,
     content,
     total,
-  });
+    entries: entries.map((e) => ({ ...e })),
+    createdAt: new Date().toISOString(),
+  };
+  ledgerData.unshift(entryRecord);
 
-  // Lưu tên người ghi gần nhất
+  // Render lại lịch sử
+  renderLedgerEntries();
+
+  // Lưu tên người ghi + người bán gần nhất
   addRecentPerson(person);
+  addRecentSeller(seller);
 
   // Reset form
   document.getElementById("ledgerContent").value = "";
@@ -418,6 +455,10 @@ function processLedgerEntry() {
 
   // Auto tính tổng chung
   calculateTotal();
+
+  // Cập nhật seller summary + filter
+  updateSellerSummary();
+  updateSellerFilter();
 
   // Lưu + badge
   saveDataToLocalStorage();
@@ -464,29 +505,265 @@ function parseContent(content) {
   return entries;
 }
 
-// Thêm icons cho session trong lịch sử
-function addToLedgerHistory(entry) {
-  const ledgerEntries = document.getElementById("ledgerEntries");
-  const entryDiv = document.createElement("div");
-  entryDiv.className = "ledger-entry";
-  const sessionIcon = entry.session === "Sáng" ? "fa-sun" : "fa-moon";
+// ===== RENDER LEDGER ENTRIES TỪ DỮ LIỆU CÓ CẤU TRÚC =====
+function renderLedgerEntries() {
+  const container = document.getElementById("ledgerEntries");
+  const filterSeller = document.getElementById("sellerFilter")?.value || "";
 
-  entryDiv.innerHTML = `
-    <div class="ledger-entry-header">
-      <span class="ledger-entry-date">${entry.date}</span>
-      <span class="ledger-entry-session">
-        <i class="fas ${sessionIcon}"></i>
-        ${entry.session}
-      </span>
-      <span class="ledger-entry-person">${entry.person}</span>
-    </div>
-    <div class="ledger-entry-content">${entry.content}</div>
-    <div class="ledger-entry-total">Tổng cộng: ${entry.total.toLocaleString(
-      "vi-VN"
-    )} đ</div>
+  // Lọc theo người bán nếu có
+  const filtered = filterSeller
+    ? ledgerData.filter((e) => e.seller === filterSeller)
+    : ledgerData;
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div style="text-align:center;color:var(--text-light);padding:20px;">Chưa có dữ liệu ghi sổ</div>';
+    return;
+  }
+
+  container.innerHTML = filtered.map((entry) => {
+    const sessionIcon = entry.session === "Sáng" ? "fa-sun" : "fa-moon";
+    const sellerBadge = entry.seller
+      ? `<span class="ledger-entry-seller"><i class="fas fa-store"></i> ${entry.seller}</span>`
+      : '';
+    return `
+      <div class="ledger-entry" data-id="${entry.id}">
+        <div class="ledger-entry-header">
+          <span class="ledger-entry-date">${entry.date}</span>
+          <span class="ledger-entry-session">
+            <i class="fas ${sessionIcon}"></i>
+            ${entry.session}
+          </span>
+          <span class="ledger-entry-person">${entry.person}</span>
+          ${sellerBadge}
+          <span class="entry-actions">
+            <button class="btn-entry-action btn-edit" onclick="openEditModal(${entry.id})" title="Sửa">
+              <i class="fas fa-pen"></i>
+            </button>
+            <button class="btn-entry-action btn-delete" onclick="deleteLedgerEntry(${entry.id})" title="Xóa">
+              <i class="fas fa-trash"></i>
+            </button>
+          </span>
+        </div>
+        <div class="ledger-entry-content">${entry.content}</div>
+        <div class="ledger-entry-total">Tổng cộng: ${entry.total.toLocaleString("vi-VN")} đ</div>
+      </div>
+    `;
+  }).join("");
+}
+
+// ===== EDIT MODAL =====
+function openEditModal(entryId) {
+  const entry = ledgerData.find((e) => e.id === entryId);
+  if (!entry) return;
+
+  document.getElementById("editEntryId").value = entryId;
+  document.getElementById("editDate").value = entry.date;
+  document.getElementById("editPerson").value = entry.person;
+  document.getElementById("editSeller").value = entry.seller || "";
+  document.getElementById("editContent").value = entry.content;
+
+  // Set session radio
+  const sessionRadios = document.querySelectorAll('input[name="editSession"]');
+  sessionRadios.forEach((r) => {
+    r.checked = r.value === entry.session;
+  });
+
+  document.getElementById("editModal").classList.add("show");
+}
+
+function closeEditModal() {
+  document.getElementById("editModal").classList.remove("show");
+}
+
+function saveEditedEntry() {
+  const entryId = parseInt(document.getElementById("editEntryId").value);
+  const entry = ledgerData.find((e) => e.id === entryId);
+  if (!entry) return;
+
+  const newDate = document.getElementById("editDate").value;
+  const newSession = document.querySelector('input[name="editSession"]:checked').value;
+  const newPerson = document.getElementById("editPerson").value;
+  const newSeller = document.getElementById("editSeller").value;
+  const newContent = document.getElementById("editContent").value;
+
+  if (!newDate || !newPerson || !newContent) {
+    alert("Vui lòng điền đầy đủ thông tin!");
+    return;
+  }
+
+  const newEntries = parseContent(newContent);
+  if (newEntries.length === 0) {
+    showNotification("Không tìm thấy con vật hoặc số tiền hợp lệ!", "error");
+    return;
+  }
+
+  // 1. Rollback: trừ lại các amount cũ khỏi cellHistory và cell totals
+  rollbackEntry(entry);
+
+  // 2. Apply: cập nhật entry mới và cộng lại
+  const newTotal = newEntries.reduce((sum, e) => sum + e.amount, 0);
+  entry.date = newDate;
+  entry.session = newSession;
+  entry.person = newPerson;
+  entry.seller = newSeller;
+  entry.content = newContent;
+  entry.total = newTotal;
+  entry.entries = newEntries;
+
+  applyEntry(entry);
+
+  // 3. Re-render
+  renderLedgerEntries();
+  calculateTotal();
+  updateSellerSummary();
+  updateSellerFilter();
+  saveDataToLocalStorage();
+  closeEditModal();
+  showNotification("Đã cập nhật ghi sổ!");
+}
+
+// ===== DELETE ENTRY =====
+function deleteLedgerEntry(entryId) {
+  if (!confirm("Bạn có chắc muốn xóa mục ghi sổ này?")) return;
+
+  const entryIndex = ledgerData.findIndex((e) => e.id === entryId);
+  if (entryIndex === -1) return;
+
+  const entry = ledgerData[entryIndex];
+
+  // Rollback cell amounts
+  rollbackEntry(entry);
+
+  // Remove from ledgerData
+  ledgerData.splice(entryIndex, 1);
+
+  // Re-render
+  renderLedgerEntries();
+  calculateTotal();
+  updateSellerSummary();
+  updateSellerFilter();
+  saveDataToLocalStorage();
+  showNotification("Đã xóa mục ghi sổ!");
+}
+
+// ===== ROLLBACK / APPLY HELPERS =====
+function rollbackEntry(entry) {
+  const cells = document.querySelectorAll(".cell");
+  (entry.entries || []).forEach((e) => {
+    const idx = animalNameToIndex[e.animal];
+    if (idx === undefined) return;
+    const cell = cells[idx];
+    const itemTotal = cell.querySelector(".item-total");
+    const currentTotal = parseInt(itemTotal.dataset.total || 0);
+    itemTotal.dataset.total = currentTotal - e.amount;
+    itemTotal.textContent = `Tổng: ${(currentTotal - e.amount).toLocaleString("vi-VN")} đ`;
+
+    // Remove matching cellHistory record
+    const histArr = cellHistory[idx];
+    for (let i = histArr.length - 1; i >= 0; i--) {
+      if (histArr[i].amount === e.amount && histArr[i].person === entry.person && histArr[i].session === entry.session) {
+        histArr.splice(i, 1);
+        break;
+      }
+    }
+
+    const history = cell.querySelector(".history");
+    updateHistory(history, cellHistory[idx]);
+    calculateColumnTotal(idx % 6);
+  });
+}
+
+function applyEntry(entry) {
+  const cells = document.querySelectorAll(".cell");
+  const currentTime = new Date().toLocaleString("vi-VN");
+  (entry.entries || []).forEach((e) => {
+    const idx = animalNameToIndex[e.animal];
+    if (idx === undefined) return;
+    const cell = cells[idx];
+    const itemTotal = cell.querySelector(".item-total");
+    const currentTotal = parseInt(itemTotal.dataset.total || 0);
+    itemTotal.dataset.total = currentTotal + e.amount;
+    itemTotal.textContent = `Tổng: ${(currentTotal + e.amount).toLocaleString("vi-VN")} đ`;
+
+    cellHistory[idx].push({
+      time: currentTime,
+      session: entry.session,
+      amount: e.amount,
+      person: entry.person,
+      seller: entry.seller,
+    });
+
+    const history = cell.querySelector(".history");
+    updateHistory(history, cellHistory[idx]);
+    calculateColumnTotal(idx % 6);
+  });
+}
+
+// ===== SELLER FILTER =====
+function filterBySeller() {
+  renderLedgerEntries();
+}
+
+function updateSellerFilter() {
+  const select = document.getElementById("sellerFilter");
+  if (!select) return;
+  const currentVal = select.value;
+
+  // Lấy danh sách sellers duy nhất
+  const sellers = [...new Set(ledgerData.map((e) => e.seller).filter(Boolean))];
+  sellers.sort();
+
+  select.innerHTML = '<option value="">-- Tất cả --</option>' +
+    sellers.map((s) => `<option value="${s}" ${s === currentVal ? 'selected' : ''}>${s}</option>`).join("");
+}
+
+// ===== SELLER SUMMARY =====
+function updateSellerSummary() {
+  const card = document.getElementById("sellerSummaryCard");
+  const body = document.getElementById("sellerSummaryBody");
+  if (!card || !body) return;
+
+  // Group by seller
+  const sellerTotals = {};
+  ledgerData.forEach((entry) => {
+    const seller = entry.seller || "(Không rõ)";
+    if (!sellerTotals[seller]) sellerTotals[seller] = 0;
+    sellerTotals[seller] += entry.total;
+  });
+
+  const sellers = Object.entries(sellerTotals).sort((a, b) => b[1] - a[1]);
+
+  if (sellers.length === 0) {
+    card.style.display = "none";
+    return;
+  }
+
+  card.style.display = "block";
+  const grandTotal = sellers.reduce((sum, [, total]) => sum + total, 0);
+
+  body.innerHTML = `
+    <table class="seller-summary-table">
+      <thead>
+        <tr><th>Người bán</th><th>Tổng tiền</th><th>Tỷ lệ</th></tr>
+      </thead>
+      <tbody>
+        ${sellers.map(([seller, total]) => `
+          <tr>
+            <td><i class="fas fa-store"></i> ${seller}</td>
+            <td class="seller-total-amount">${total.toLocaleString("vi-VN")} đ</td>
+            <td>${grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0}%</td>
+          </tr>
+        `).join("")}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td><strong>Tổng cộng</strong></td>
+          <td class="seller-total-amount"><strong>${grandTotal.toLocaleString("vi-VN")} đ</strong></td>
+          <td><strong>100%</strong></td>
+        </tr>
+      </tfoot>
+    </table>
   `;
-
-  ledgerEntries.insertBefore(entryDiv, ledgerEntries.firstChild);
 }
 
 // Thêm sự kiện lắng nghe thay đổi nội dung để tính tổng
@@ -534,8 +811,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const debouncedSearch = debounce(searchAnimals, 300);
   searchInput.addEventListener("input", debouncedSearch);
 
-  // Cập nhật gợi ý người ghi
+  // Cập nhật gợi ý người ghi + người bán
   updatePersonSuggestions();
+  updateSellerSuggestions();
 
   // Cập nhật undo button
   updateUndoButton();
@@ -574,26 +852,23 @@ document.addEventListener("DOMContentLoaded", () => {
 async function exportHistory() {
   try {
     toggleLoading(true);
-    // Tạo dữ liệu cho sheet lịch sử ghi sổ
-    const ledgerEntries = document.querySelectorAll(".ledger-entry");
-    const ledgerData = [["Ngày", "Buổi", "Người Ghi", "Nội Dung", "Tổng Tiền"]];
+    // Tạo dữ liệu cho sheet lịch sử ghi sổ (từ ledgerData)
+    const ledgerSheetData = [["Ngày", "Buổi", "Người Mua", "Người Bán", "Nội Dung", "Tổng Tiền"]];
 
-    ledgerEntries.forEach((entry) => {
-      const date = entry.querySelector(".ledger-entry-date").textContent;
-      const session = entry.querySelector(".ledger-entry-session").textContent;
-      const person = entry.querySelector(".ledger-entry-person").textContent;
-      const content = entry.querySelector(".ledger-entry-content").textContent;
-      const total = entry
-        .querySelector(".ledger-entry-total")
-        .textContent.replace("Tổng cộng: ", "")
-        .replace(" đ", "");
-
-      ledgerData.push([date, session, person, content, total]);
+    ledgerData.forEach((entry) => {
+      ledgerSheetData.push([
+        entry.date,
+        entry.session,
+        entry.person,
+        entry.seller || "",
+        entry.content,
+        entry.total,
+      ]);
     });
 
     // Tạo dữ liệu cho sheet lịch sử từng ô
     const cellsData = [
-      ["Con Vật", "Thời Gian", "Buổi", "Số Tiền", "Tổng Hiện Tại"],
+      ["Con Vật", "Thời Gian", "Buổi", "Người Mua", "Người Bán", "Số Tiền", "Tổng Hiện Tại"],
     ];
 
     document.querySelectorAll(".cell").forEach((cell, index) => {
@@ -607,8 +882,10 @@ async function exportHistory() {
           animalName,
           record.time,
           record.session || "",
-          record.amount.toLocaleString("vi-VN"),
-          runningTotal.toLocaleString("vi-VN"),
+          record.person || "",
+          record.seller || "",
+          record.amount,
+          runningTotal,
         ]);
       });
     });
@@ -620,14 +897,29 @@ async function exportHistory() {
       const total = parseInt(
         cell.querySelector(".item-total").dataset.total || 0
       );
-      summaryData.push([animalName, total.toLocaleString("vi-VN")]);
+      summaryData.push([animalName, total]);
     });
+
+    // Tạo dữ liệu cho sheet tổng theo người bán
+    const sellerSummaryData = [["Người Bán", "Tổng Tiền", "Số Lần Ghi"]];
+    const sellerMap = {};
+    ledgerData.forEach((entry) => {
+      const seller = entry.seller || "(Không rõ)";
+      if (!sellerMap[seller]) sellerMap[seller] = { total: 0, count: 0 };
+      sellerMap[seller].total += entry.total;
+      sellerMap[seller].count += 1;
+    });
+    Object.entries(sellerMap)
+      .sort((a, b) => b[1].total - a[1].total)
+      .forEach(([seller, data]) => {
+        sellerSummaryData.push([seller, data.total, data.count]);
+      });
 
     // Tạo workbook với nhiều sheet
     const wb = XLSX.utils.book_new();
 
     // Thêm các sheet
-    const ws1 = XLSX.utils.aoa_to_sheet(ledgerData);
+    const ws1 = XLSX.utils.aoa_to_sheet(ledgerSheetData);
     XLSX.utils.book_append_sheet(wb, ws1, "Lịch Sử Ghi Sổ");
 
     const ws2 = XLSX.utils.aoa_to_sheet(cellsData);
@@ -635,6 +927,9 @@ async function exportHistory() {
 
     const ws3 = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, ws3, "Tổng Hợp");
+
+    const ws4 = XLSX.utils.aoa_to_sheet(sellerSummaryData);
+    XLSX.utils.book_append_sheet(wb, ws4, "Tổng Theo Người Bán");
 
     // Tạo tên file với ngày giờ hiện tại
     const now = new Date();
@@ -659,7 +954,8 @@ async function exportHistory() {
 function saveDataToLocalStorage() {
   const data = {
     cellHistory: cellHistory,
-    ledgerEntries: document.getElementById("ledgerEntries").innerHTML,
+    ledgerData: ledgerData,
+    nextEntryId: nextEntryId,
     lastUpdate: new Date().toLocaleString("vi-VN"),
   };
   localStorage.setItem("coNhonData", JSON.stringify(data));
@@ -674,8 +970,14 @@ function loadDataFromLocalStorage() {
     // Khôi phục lịch sử các ô
     cellHistory.splice(0, cellHistory.length, ...data.cellHistory);
 
-    // Khôi phục lịch sử ghi sổ
-    document.getElementById("ledgerEntries").innerHTML = data.ledgerEntries;
+    // Khôi phục dữ liệu ghi sổ có cấu trúc
+    if (data.ledgerData) {
+      ledgerData = data.ledgerData;
+      nextEntryId = data.nextEntryId || (ledgerData.length > 0 ? Math.max(...ledgerData.map(e => e.id)) + 1 : 1);
+    } else if (data.ledgerEntries) {
+      // Migration: chuyển từ innerHTML cũ sang cấu trúc mới
+      migrateLedgerEntries(data.ledgerEntries);
+    }
 
     // Cập nhật tổng tiền cho từng ô
     document.querySelectorAll(".cell").forEach((cell, index) => {
@@ -698,6 +1000,11 @@ function loadDataFromLocalStorage() {
     // Cập nhật tổng tất cả
     calculateTotal();
 
+    // Render lịch sử ghi sổ
+    renderLedgerEntries();
+    updateSellerSummary();
+    updateSellerFilter();
+
     // Cập nhật badge lần cuối
     const badge = document.getElementById("lastUpdateBadge");
     if (badge && data.lastUpdate) {
@@ -706,6 +1013,44 @@ function loadDataFromLocalStorage() {
 
     console.log(`Đã tải dữ liệu (Cập nhật lần cuối: ${data.lastUpdate})`);
   }
+}
+
+// Migration: chuyển từ innerHTML cũ sang cấu trúc mới
+function migrateLedgerEntries(html) {
+  const temp = document.createElement("div");
+  temp.innerHTML = html;
+  const entries = temp.querySelectorAll(".ledger-entry");
+
+  entries.forEach((el) => {
+    const dateEl = el.querySelector(".ledger-entry-date");
+    const sessionEl = el.querySelector(".ledger-entry-session");
+    const personEl = el.querySelector(".ledger-entry-person");
+    const contentEl = el.querySelector(".ledger-entry-content");
+    const totalEl = el.querySelector(".ledger-entry-total");
+
+    if (!dateEl || !sessionEl || !personEl || !contentEl || !totalEl) return;
+
+    const date = dateEl.textContent.trim();
+    const session = sessionEl.textContent.trim();
+    const person = personEl.textContent.trim();
+    const content = contentEl.textContent.trim();
+    const totalText = totalEl.textContent.replace("Tổng cộng:", "").replace("đ", "").replace(/\./g, "").replace(/,/g, "").trim();
+    const total = parseInt(totalText) || 0;
+
+    const parsedEntries = parseContent(content);
+
+    ledgerData.push({
+      id: nextEntryId++,
+      date,
+      session,
+      person,
+      seller: "",
+      content,
+      total,
+      entries: parsedEntries,
+      createdAt: new Date().toISOString(),
+    });
+  });
 }
 
 // Thêm nút xóa dữ liệu
