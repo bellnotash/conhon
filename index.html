@@ -176,6 +176,36 @@
         </div>
 
         <div class="tab-panel" id="historyTab">
+          <!-- Tra cứu con xổ -->
+          <div class="win-lookup card">
+            <div class="card-header"><i class="fas fa-trophy"></i> Tra Cứu Con Xổ</div>
+            <div class="card-body win-lookup-body">
+              <div class="win-lookup-row">
+                <label><i class="far fa-clock"></i> Buổi</label>
+                <select id="winSession" class="form-control">
+                  <option value="">-- Cả ngày --</option>
+                  <option value="Sáng">Sáng</option>
+                  <option value="Chiều">Chiều</option>
+                </select>
+              </div>
+              <div class="win-lookup-row">
+                <label><i class="fas fa-paw"></i> Con xổ</label>
+                <select id="winAnimal" class="form-control">
+                  <option value="">-- Chọn con --</option>
+                </select>
+              </div>
+              <div class="win-lookup-row win-lookup-action">
+                <button class="btn-submit" onclick="filterWinningEntries()">
+                  <i class="fas fa-filter"></i> Lọc phiếu
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Kết quả tra cứu con xổ -->
+          <div class="card" id="winResultCard" style="display:none;">
+            <div class="card-header win-result-header"><i class="fas fa-list-check"></i> <span id="winResultTitle">Phiếu chứa con xổ</span></div>
+            <div class="card-body" id="winResultBody"></div>
+          </div>
           <!-- Seller filter + summary -->
           <div class="seller-filter-bar">
             <div class="filter-row">

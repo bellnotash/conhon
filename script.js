@@ -766,6 +766,143 @@ function updateSellerSummary() {
   `;
 }
 
+// ===== TRA CỨU CON XỔ =====
+function populateWinAnimalSelect() {
+  const sel = document.getElementById('winAnimal');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- Chọn con --</option>';
+  animals.forEach((a, idx) => {
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.textContent = `${a.id} - ${a.name} (${a.type})`;
+    sel.appendChild(opt);
+  });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function filterWinningEntries() {
+  const session = document.getElementById('winSession')?.value || '';
+  const animalIndexStr = document.getElementById('winAnimal')?.value;
+  const card = document.getElementById('winResultCard');
+  const body = document.getElementById('winResultBody');
+  const titleEl = document.getElementById('winResultTitle');
+  if (!card || !body) return;
+
+  body.innerHTML = '';
+  card.style.display = 'none';
+
+  if (animalIndexStr === '' || animalIndexStr == null) {
+    showNotification('Vui lòng chọn con đã xổ!', 'error');
+    return;
+  }
+
+  const animalIdx = Number(animalIndexStr);
+  const a = animals[animalIdx];
+  const sessionLabel = session || 'Cả ngày';
+  titleEl.textContent = `Phiếu chứa: ${a.type} (${a.name}) — ${sessionLabel}`;
+
+  // Tìm tất cả phiếu có chứa con này
+  const matches = [];
+
+  ledgerData.forEach((entry) => {
+    // Lọc buổi nếu có chọn
+    if (session && entry.session !== session) return;
+
+    // Kiểm tra entries có chứa con xổ không
+    const hitItems = (entry.entries || []).filter((e) => {
+      const idx = animalNameToIndex[e.animal];
+      return idx === animalIdx;
+    });
+
+    if (hitItems.length > 0) {
+      const hitSum = hitItems.reduce((s, it) => s + (it.amount || 0), 0);
+      matches.push({ entry, hitItems, hitSum });
+    }
+  });
+
+  if (matches.length === 0) {
+    body.innerHTML = `<div class="win-empty">
+      <i class="fas fa-search"></i>
+      <p>Không có phiếu nào chứa <strong>${a.type}</strong>${session ? ' buổi <strong>' + session + '</strong>' : ''}.</p>
+    </div>`;
+    card.style.display = 'block';
+    return;
+  }
+
+  const totalHit = matches.reduce((s, m) => s + m.hitSum, 0);
+  const totalEntries = matches.length;
+
+  // Summary
+  const summary = document.createElement('div');
+  summary.className = 'win-summary';
+  summary.innerHTML = `
+    <div class="win-summary-grid">
+      <div class="win-stat">
+        <div class="win-stat-label"><i class="fas fa-receipt"></i> Số phiếu</div>
+        <div class="win-stat-value">${totalEntries}</div>
+      </div>
+      <div class="win-stat">
+        <div class="win-stat-label"><i class="fas fa-coins"></i> Tổng tiền đánh ${a.type}</div>
+        <div class="win-stat-value win-stat-money">${totalHit.toLocaleString('vi-VN')} đ</div>
+      </div>
+    </div>
+  `;
+  body.appendChild(summary);
+
+  // List
+  const list = document.createElement('div');
+  list.className = 'win-list';
+
+  matches.forEach((m) => {
+    const sessionIcon = m.entry.session === 'Sáng' ? 'fa-sun' : 'fa-moon';
+    const sellerHtml = m.entry.seller
+      ? `<span class="ledger-entry-seller"><i class="fas fa-store"></i> ${escapeHtml(m.entry.seller)}</span>`
+      : '';
+
+    // Highlight con xổ trong nội dung
+    let contentHighlighted = escapeHtml(m.entry.content);
+    // Highlight animal type in content (case insensitive)
+    const typeRegex = new RegExp('(' + a.type.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    contentHighlighted = contentHighlighted.replace(typeRegex, '<mark class="win-highlight">$1</mark>');
+    // Also try short form
+    const shortType = a.type.toLowerCase().replace(/^(con |cá |hòn |rồng )/, '');
+    if (shortType !== a.type.toLowerCase()) {
+      const shortRegex = new RegExp('(' + shortType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+      contentHighlighted = contentHighlighted.replace(shortRegex, '<mark class="win-highlight">$1</mark>');
+    }
+
+    const div = document.createElement('div');
+    div.className = 'win-item';
+    div.innerHTML = `
+      <div class="win-item-header">
+        <div class="win-item-meta">
+          <span class="ledger-entry-date">${m.entry.date}</span>
+          <span class="ledger-entry-session"><i class="fas ${sessionIcon}"></i> ${m.entry.session}</span>
+          <span class="ledger-entry-person">${escapeHtml(m.entry.person)}</span>
+          ${sellerHtml}
+        </div>
+        <div class="win-item-amount">+${m.hitSum.toLocaleString('vi-VN')} đ</div>
+      </div>
+      <div class="win-item-content">${contentHighlighted}</div>
+      <div class="win-item-footer">
+        <span class="win-item-total-label">Tổng phiếu:</span>
+        <span class="win-item-total-value">${m.entry.total.toLocaleString('vi-VN')} đ</span>
+      </div>
+    `;
+    list.appendChild(div);
+  });
+
+  body.appendChild(list);
+  card.style.display = 'block';
+
+  showNotification(`Tìm thấy ${totalEntries} phiếu chứa ${a.type}!`);
+}
+
 // Thêm sự kiện lắng nghe thay đổi nội dung để tính tổng
 document.getElementById("ledgerContent").addEventListener("input", function () {
   const entries = parseContent(this.value);
@@ -814,6 +951,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Cập nhật gợi ý người ghi + người bán
   updatePersonSuggestions();
   updateSellerSuggestions();
+
+  // Khởi tạo dropdown con vật cho tra cứu xổ
+  populateWinAnimalSelect();
 
   // Cập nhật undo button
   updateUndoButton();
