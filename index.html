@@ -3,137 +3,175 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bảng Tính Tiền - Xuân Giáp Ất Tỵ 2025</title>
+    <title>Cổ Nhơn 2026 - Xuân Bính Ngọ</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
     <link
       rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
     />
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div class="loading-overlay">
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
       <div class="loading-spinner"></div>
     </div>
+
+    <!-- Toast notification -->
     <div class="notification" id="notification"></div>
-    <div class="container">
-      <div class="header">
-        <img
-          src="images/lantern.png"
-          alt="Đèn lồng"
-          class="lantern lantern-left"
-        />
-        <img
-          src="images/lantern.png"
-          alt="Đèn lồng"
-          class="lantern lantern-right"
-        />
-        <h1>CỔ NHƠN 2025 - XUÂN ẤT TỴ</h1>
-      </div>
 
-      <!-- Thêm form ghi sổ -->
-      <div class="ledger-form">
-        <h2>Ghi Sổ</h2>
-        <div class="form-group">
-          <label>Ngày:</label>
-          <input type="date" id="ledgerDate" class="ledger-input" />
+    <!-- ===== HEADER ===== -->
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="header-deco">
+          <img src="images/lantern.png" alt="" class="lantern" />
         </div>
-        <div class="form-group">
-          <label>Buổi:</label>
-          <div class="session-selector">
-            <label class="session-option">
-              <input type="radio" name="session" value="Sáng" checked />
-              <span class="session-label">
-                <i class="fas fa-sun"></i>
-                Sáng
-              </span>
-            </label>
-            <label class="session-option">
-              <input type="radio" name="session" value="Chiều" />
-              <span class="session-label">
-                <i class="fas fa-moon"></i>
-                Chiều
-              </span>
-            </label>
-          </div>
+        <div class="header-content">
+          <h1 class="app-title">CỔ NHƠN 2026</h1>
+          <p class="app-subtitle">XUÂN BÍNH NGỌ</p>
         </div>
-        <div class="form-group">
-          <label>Của:</label>
-          <input
-            type="text"
-            id="ledgerPerson"
-            class="ledger-input"
-            placeholder="Nhập tên người"
-          />
-        </div>
-        <div class="form-group">
-          <label>Nội dung:</label>
-          <textarea
-            id="ledgerContent"
-            class="ledger-input"
-            placeholder="Ví dụ: cá trắng 50k, con ốc 100k"
-          ></textarea>
-        </div>
-        <div class="form-group">
-          <label>Tổng cộng:</label>
-          <div id="ledgerTotal" class="ledger-total">0 đ</div>
-        </div>
-        <div class="ledger-btn-container">
-          <button onclick="processLedgerEntry()" class="ledger-btn">
-            <i class="fas fa-book"></i>
-            Ghi vào sổ
-          </button>
+        <div class="header-deco">
+          <img src="images/lantern.png" alt="" class="lantern" />
         </div>
       </div>
+    </header>
 
-      <!-- Hiển thị lịch sử ghi sổ -->
-      <div class="ledger-history">
-        <h2>Lịch Sử Ghi Sổ</h2>
-        <div id="ledgerEntries"></div>
-      </div>
-
-      <!-- Thêm h2 trước grid -->
-      <div class="grid-section">
-        <h2 class="section-title">Danh Sách Các Con Vật</h2>
-        <div class="search-section">
-          <div class="search-box">
+    <!-- ===== STICKY TOOLBAR ===== -->
+    <nav class="toolbar" id="toolbar">
+      <div class="toolbar-inner">
+        <div class="toolbar-left">
+          <span class="badge-update" id="lastUpdateBadge">
+            <i class="fas fa-clock"></i> Chưa có dữ liệu
+          </span>
+        </div>
+        <div class="toolbar-center">
+          <div class="search-wrapper">
+            <i class="fas fa-search search-icon"></i>
             <input
               type="text"
               id="searchInput"
               class="search-input"
-              placeholder="Tìm kiếm theo tên hoặc loại con vật..."
+              placeholder="Tìm con vật… (Ctrl+F)"
             />
-            <i class="fas fa-search search-icon"></i>
           </div>
         </div>
-        <div class="grid">
-          <!-- Grid sẽ được tạo bằng JavaScript -->
+        <div class="toolbar-right">
+          <button onclick="calculateTotal()" class="tb-btn tb-primary" title="Tính tổng">
+            <i class="fas fa-calculator"></i><span class="tb-label">Tổng</span>
+          </button>
+          <button id="undoBtn" onclick="performUndo()" class="tb-btn tb-warn" title="Hoàn tác (Ctrl+Z)" disabled>
+            <i class="fas fa-undo"></i><span class="tb-label">Hoàn tác</span>
+          </button>
+          <button onclick="exportHistory()" class="tb-btn tb-blue" title="Xuất Excel">
+            <i class="fas fa-file-excel"></i><span class="tb-label">Excel</span>
+          </button>
+          <button onclick="exportAsImage()" class="tb-btn tb-green" title="Xuất ảnh">
+            <i class="fas fa-image"></i><span class="tb-label">Ảnh</span>
+          </button>
+          <button onclick="clearAllData()" class="tb-btn tb-danger" title="Xóa tất cả">
+            <i class="fas fa-trash-alt"></i><span class="tb-label">Xóa</span>
+          </button>
         </div>
       </div>
+    </nav>
 
-      <div class="controls">
-        <div class="button-group">
-          <button onclick="calculateTotal()" class="calculate-btn">
-            <i class="fas fa-calculator"></i>
-            Tính Tổng Tất Cả
+    <!-- ===== MAIN 2-COL LAYOUT ===== -->
+    <main class="main-layout">
+      <!-- LEFT SIDEBAR: Form + Lịch sử -->
+      <aside class="sidebar">
+        <section class="card card-form">
+          <div class="card-header"><i class="fas fa-pen-fancy"></i> Ghi Sổ</div>
+          <div class="card-body">
+            <div class="form-row">
+              <label><i class="far fa-calendar-alt"></i> Ngày</label>
+              <input type="date" id="ledgerDate" class="form-control" />
+            </div>
+            <div class="form-row">
+              <label><i class="far fa-clock"></i> Buổi</label>
+              <div class="session-selector">
+                <label class="session-chip">
+                  <input type="radio" name="session" value="Sáng" checked />
+                  <span><i class="fas fa-sun"></i> Sáng</span>
+                </label>
+                <label class="session-chip">
+                  <input type="radio" name="session" value="Chiều" />
+                  <span><i class="fas fa-moon"></i> Chiều</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <label><i class="far fa-user"></i> Của</label>
+              <input
+                type="text"
+                id="ledgerPerson"
+                class="form-control"
+                placeholder="Tên người mua"
+                list="personSuggestions"
+                autocomplete="off"
+              />
+              <datalist id="personSuggestions"></datalist>
+            </div>
+            <div class="form-row">
+              <label><i class="far fa-edit"></i> Nội dung</label>
+              <textarea
+                id="ledgerContent"
+                class="form-control"
+                rows="3"
+                placeholder="VD: cá trắng 50k, ốc 100k, thỏ 0.5m"
+              ></textarea>
+            </div>
+            <div class="form-total-row">
+              <span class="form-total-label">Tổng cộng:</span>
+              <span id="ledgerTotal" class="form-total-value">0 đ</span>
+            </div>
+            <button onclick="processLedgerEntry()" class="btn-submit">
+              <i class="fas fa-check-circle"></i> Ghi vào sổ
+            </button>
+          </div>
+        </section>
+
+      </aside>
+
+      <!-- RIGHT: Tabs -->
+      <section class="content">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="gridTab">
+            <i class="fas fa-th"></i> Bảng Con Vật
           </button>
-          <button onclick="exportHistory()" class="export-btn">
-            <i class="fas fa-file-export"></i>
-            Xuất Lịch Sử
-          </button>
-          <button onclick="exportAsImage()" class="export-image-btn">
-            <i class="fas fa-image"></i>
-            Xuất Ảnh
-          </button>
-          <button onclick="clearAllData()" class="clear-btn">
-            <i class="fas fa-trash-alt"></i>
-            Xóa Dữ Liệu
+          <button class="tab-btn" data-tab="historyTab">
+            <i class="fas fa-history"></i> Lịch Sử Ghi Sổ
           </button>
         </div>
-        <div id="totalAmount">Tổng: 0 đ</div>
-      </div>
-    </div>
+
+        <div class="tab-panel active" id="gridTab">
+          <div class="grid" id="animalGrid">
+            <!-- JS renders -->
+          </div>
+          <div class="grand-total-bar">
+            <div class="shortcut-hint">
+              <span><kbd>Ctrl</kbd>+<kbd>F</kbd> Tìm</span>
+              <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> Hoàn tác</span>
+              <span><kbd>Esc</kbd> Đóng</span>
+            </div>
+            <div id="totalAmount" class="grand-total-value">Tổng: 0 đ</div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="historyTab">
+          <div class="card card-history">
+            <div class="card-header"><i class="fas fa-history"></i> Lịch Sử Ghi Sổ</div>
+            <div class="card-body" id="ledgerEntries"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <script src="script.js"></script>
   </body>
 </html>

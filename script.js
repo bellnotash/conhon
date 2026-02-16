@@ -43,11 +43,176 @@ const cellHistory = Array(36)
   .fill()
   .map(() => []);
 
-// Thêm object để map tên con vật với index trong grid
+// ===== CẤU HÌNH NĂM =====
+const APP_CONFIG = {
+  year: 2026,
+  lunar: "BÍNH NGỌ",
+  title: "CỔ NHƠN 2026 - XUÂN BÍNH NGỌ",
+};
+
+// ===== HÀM PARSE TIỀN ĐA ĐỊNH DẠNG =====
+// Hỗ trợ: 50k, 50K, 0.5m, 50.000, 50,000, 50000, +50k, -50k
+function parseMoney(str) {
+  if (!str) return 0;
+  str = str.toString().trim().toLowerCase();
+  if (!str) return 0;
+
+  // Bỏ dấu +/- (chỉ cho phép số dương)
+  str = str.replace(/^[\+\-]/, "").trim();
+
+  // Hậu tố "m" (triệu)
+  if (str.endsWith("m")) {
+    const num = parseFloat(str.replace("m", "").replace(/,/g, "."));
+    return isNaN(num) ? 0 : Math.abs(Math.round(num * 1000000));
+  }
+
+  // Hậu tố "k" (nghìn)
+  if (str.endsWith("k")) {
+    const numStr = str.replace("k", "").replace(/\./g, "").replace(/,/g, ".");
+    const num = parseFloat(numStr);
+    return isNaN(num) ? 0 : Math.abs(Math.round(num * 1000));
+  }
+
+  // Dấu chấm phân cách hàng nghìn: "50.000"
+  if (/^\d{1,3}(\.\d{3})+$/.test(str)) {
+    return Math.abs(parseInt(str.replace(/\./g, "")));
+  }
+
+  // Dấu phẩy phân cách hàng nghìn: "50,000"
+  if (/^\d{1,3}(,\d{3})+$/.test(str)) {
+    return Math.abs(parseInt(str.replace(/,/g, "")));
+  }
+
+  // Số thuần
+  const num = parseInt(str);
+  return isNaN(num) ? 0 : Math.abs(num);
+}
+
+// ===== BỎ DẤU TIẾNG VIỆT =====
+function removeVietnameseDiacritics(str) {
+  str = str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  str = str.replace(/đ/gi, "d");
+  return str;
+}
+
+// ===== MAP TÊN CON VẬT VỚI INDEX (CÓ ALIAS) =====
 const animalNameToIndex = {};
 animals.forEach((animal, index) => {
-  animalNameToIndex[animal.type.toLowerCase()] = index;
+  const type = animal.type.toLowerCase();
+  animalNameToIndex[type] = index;
+
+  // Thêm phiên bản không dấu
+  const noDiacritics = removeVietnameseDiacritics(type);
+  if (noDiacritics !== type) animalNameToIndex[noDiacritics] = index;
+
+  // Thêm tên rút gọn (bỏ "con ", "cá ", "hòn ")
+  const shortForm = type.replace(/^(con |cá |hòn |rồng )/, "");
+  if (shortForm !== type) {
+    animalNameToIndex[shortForm] = index;
+    const shortNoDiacritics = removeVietnameseDiacritics(shortForm);
+    if (shortNoDiacritics !== shortForm) animalNameToIndex[shortNoDiacritics] = index;
+  }
 });
+
+// Sắp xếp alias theo độ dài giảm dần (match dài trước)
+const sortedAnimalEntries = Object.entries(animalNameToIndex)
+  .sort((a, b) => b[0].length - a[0].length);
+
+// ===== UNDO STACK =====
+const undoStack = [];
+const MAX_UNDO = 50;
+
+function pushUndo(action) {
+  undoStack.push(action);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  const btn = document.getElementById("undoBtn");
+  if (btn) btn.disabled = undoStack.length === 0;
+}
+
+function performUndo() {
+  if (undoStack.length === 0) {
+    showNotification("Không có thao tác để hoàn tác!", "error");
+    return;
+  }
+  const action = undoStack.pop();
+  const cells = document.querySelectorAll(".cell");
+
+  if (action.type === "cell") {
+    const cell = cells[action.index];
+    const itemTotal = cell.querySelector(".item-total");
+    // Trừ lại số tiền đã cộng
+    const currentTotal = parseInt(itemTotal.dataset.total || 0);
+    const newTotal = currentTotal - action.amount;
+    itemTotal.dataset.total = newTotal;
+    itemTotal.textContent = `Tổng: ${newTotal.toLocaleString("vi-VN")} đ`;
+    // Xóa record cuối trong lịch sử ô
+    cellHistory[action.index].pop();
+    const history = cell.querySelector(".history");
+    updateHistory(history, cellHistory[action.index]);
+    calculateColumnTotal(action.index % 6);
+    calculateTotal();
+    saveDataToLocalStorage();
+    showNotification(`Đã hoàn tác: ${animals[action.index].type}`);
+  } else if (action.type === "ledger") {
+    // Hoàn tác nhiều ô từ ghi sổ
+    action.entries.forEach((entry) => {
+      const idx = animalNameToIndex[entry.animal];
+      if (idx !== undefined) {
+        const cell = cells[idx];
+        const itemTotal = cell.querySelector(".item-total");
+        const currentTotal = parseInt(itemTotal.dataset.total || 0);
+        const newTotal = currentTotal - entry.amount;
+        itemTotal.dataset.total = newTotal;
+        itemTotal.textContent = `Tổng: ${newTotal.toLocaleString("vi-VN")} đ`;
+        cellHistory[idx].pop();
+        const history = cell.querySelector(".history");
+        updateHistory(history, cellHistory[idx]);
+        calculateColumnTotal(idx % 6);
+      }
+    });
+    // Xóa ledger entry đầu tiên (mới nhất)
+    const ledgerEntries = document.getElementById("ledgerEntries");
+    if (ledgerEntries.firstElementChild) {
+      ledgerEntries.removeChild(ledgerEntries.firstElementChild);
+    }
+    calculateTotal();
+    saveDataToLocalStorage();
+    showNotification("Đã hoàn tác ghi sổ!");
+  }
+  updateUndoButton();
+}
+
+// ===== TRACKING NGƯỜI GHI GẦN NHẤT =====
+let recentPersons = JSON.parse(localStorage.getItem("recentPersons") || "[]");
+
+function addRecentPerson(name) {
+  if (!name) return;
+  recentPersons = recentPersons.filter((p) => p !== name);
+  recentPersons.unshift(name);
+  if (recentPersons.length > 10) recentPersons.pop();
+  localStorage.setItem("recentPersons", JSON.stringify(recentPersons));
+  updatePersonSuggestions();
+}
+
+function updatePersonSuggestions() {
+  const datalist = document.getElementById("personSuggestions");
+  if (!datalist) return;
+  datalist.innerHTML = recentPersons
+    .map((p) => `<option value="${p}">`)
+    .join("");
+}
+
+// ===== CẬP NHẬT BADGE LẦN CUỐI =====
+function updateLastUpdateBadge() {
+  const badge = document.getElementById("lastUpdateBadge");
+  if (badge) {
+    badge.textContent = `Cập nhật: ${new Date().toLocaleString("vi-VN")}`;
+  }
+}
 
 // Thêm hàm để lấy ngày hiện tại theo định dạng YYYY-MM-DD
 function getCurrentDate() {
@@ -60,7 +225,7 @@ function getCurrentDate() {
 
 // Sửa lại hàm createGrid
 function createGrid() {
-  const grid = document.querySelector(".grid");
+  const grid = document.getElementById("animalGrid");
 
   for (let i = 0; i < 36; i++) {
     const cell = document.createElement("div");
@@ -78,12 +243,6 @@ function createGrid() {
       animals[i].name
     }<br><span class="item-type">(${animals[i].id}) ${animals[i].type}</span>`;
 
-    // Thêm ô nhập tiền
-    const moneyInput = document.createElement("input");
-    moneyInput.type = "text";
-    moneyInput.className = "money-input";
-    moneyInput.placeholder = "Nhập +/- số tiền";
-
     // Thêm tổng tiền của ô
     const itemTotal = document.createElement("div");
     itemTotal.className = "item-total";
@@ -92,52 +251,21 @@ function createGrid() {
     // Thêm nút xem lịch sử
     const historyBtn = document.createElement("button");
     historyBtn.className = "history-btn";
-    historyBtn.textContent = "Xem lịch sử";
+    historyBtn.innerHTML = '<i class="fas fa-history"></i> Lịch sử';
 
     // Thêm div hiển thị lịch sử
     const history = document.createElement("div");
     history.className = "history";
     history.style.display = "none";
 
-    // Xử lý nhập tiền
-    moneyInput.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") {
-        const value = moneyInput.value.trim();
-        if (value) {
-          const currentTime = new Date().toLocaleString("vi-VN");
-          const amount = parseInt(value) || 0;
-
-          // Cập nhật lịch sử
-          cellHistory[i].push({
-            time: currentTime,
-            amount: amount,
-          });
-
-          // Cập nhật tổng tiền của ô
-          const currentTotal = parseInt(itemTotal.dataset.total || 0);
-          const newTotal = currentTotal + amount;
-          itemTotal.dataset.total = newTotal;
-          itemTotal.textContent = `Tổng: ${newTotal.toLocaleString("vi-VN")} đ`;
-
-          // Cập nhật lịch sử hiển thị
-          updateHistory(history, cellHistory[i]);
-
-          // Reset input
-          moneyInput.value = "";
-
-          // Tính lại tổng cột
-          calculateColumnTotal(i % 6);
-
-          // Thêm dòng này ở cuối
-          saveDataToLocalStorage();
-        }
-      }
-    });
-
     // Xử lý nút xem lịch sử
     historyBtn.addEventListener("click", () => {
       history.style.display =
         history.style.display === "none" ? "block" : "none";
+      historyBtn.innerHTML =
+        history.style.display === "none"
+          ? '<i class="fas fa-history"></i> Lịch sử'
+          : '<i class="fas fa-times"></i> Ẩn';
     });
 
     // Thêm div hiển thị tổng cột
@@ -148,7 +276,6 @@ function createGrid() {
     // Thêm các phần tử vào ô
     cell.appendChild(img);
     cell.appendChild(name);
-    cell.appendChild(moneyInput);
     cell.appendChild(itemTotal);
     cell.appendChild(historyBtn);
     cell.appendChild(history);
@@ -171,12 +298,8 @@ function updateHistory(historyDiv, cellHistory) {
                 : ""
             }
           </span>
-          <span class="history-amount ${
-            record.amount >= 0 ? "positive" : "negative"
-          }">
-            ${record.amount >= 0 ? "+" : ""}${record.amount.toLocaleString(
-          "vi-VN"
-        )} đ
+          <span class="history-amount positive">
+            +${record.amount.toLocaleString("vi-VN")} đ
           </span>
         </div>`
     )
@@ -232,7 +355,15 @@ function processLedgerEntry() {
 
   // Xử lý nội dung và cập nhật các ô
   const entries = parseContent(content);
+  if (entries.length === 0) {
+    showNotification("Không tìm thấy con vật hoặc số tiền hợp lệ!", "error");
+    return;
+  }
+
   let total = 0;
+
+  // Lưu undo cho toàn bộ lần ghi sổ
+  pushUndo({ type: "ledger", entries: entries.map((e) => ({ ...e })) });
 
   entries.forEach((entry) => {
     const { animal, amount } = entry;
@@ -256,6 +387,7 @@ function processLedgerEntry() {
         time: currentTime,
         session: session,
         amount: amount,
+        person: person,
       });
 
       // Cập nhật hiển thị lịch sử
@@ -276,36 +408,51 @@ function processLedgerEntry() {
     total,
   });
 
+  // Lưu tên người ghi gần nhất
+  addRecentPerson(person);
+
   // Reset form
   document.getElementById("ledgerContent").value = "";
   document.getElementById("ledgerTotal").textContent = "0 đ";
 
-  // Thêm dòng này ở cuối hàm
+  // Auto tính tổng chung
+  calculateTotal();
+
+  // Lưu + badge
   saveDataToLocalStorage();
+  updateLastUpdateBadge();
 
   showNotification("Đã ghi sổ thành công!");
 }
 
-// Hàm phân tích nội dung ghi sổ
+// Hàm phân tích nội dung ghi sổ (cải tiến)
 function parseContent(content) {
   const entries = [];
   const patterns = content
     .toLowerCase()
     .split(",")
-    .map((item) => item.trim());
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 
   patterns.forEach((pattern) => {
-    // Tìm số tiền (kết thúc bằng 'k' hoặc '000')
-    const match = pattern.match(/(\d+)k?$/);
-    if (match) {
-      let amount = parseInt(match[1]);
-      if (pattern.endsWith("k")) {
-        amount *= 1000;
-      }
+    // Tìm số tiền ở cuối chuỗi (hỗ trợ 50k, 100K, 0.5m, 50.000, 50000)
+    const moneyMatch = pattern.match(/([\+\-]?\s*\d[\d.,]*[km]?)\s*$/i);
+    if (moneyMatch) {
+      const amount = parseMoney(moneyMatch[1]);
+      if (amount === 0) return;
 
-      // Tìm tên con vật
-      for (const [animal, index] of Object.entries(animalNameToIndex)) {
-        if (pattern.includes(animal)) {
+      // Phần tên con vật (trước số tiền)
+      const animalPart = pattern
+        .replace(moneyMatch[0], "")
+        .trim();
+      const animalPartNoDiacritics = removeVietnameseDiacritics(animalPart);
+
+      // Match theo alias dài nhất trước
+      for (const [animal, index] of sortedAnimalEntries) {
+        if (
+          animalPart.includes(animal) ||
+          animalPartNoDiacritics.includes(animal)
+        ) {
           entries.push({ animal, amount });
           break;
         }
@@ -350,10 +497,27 @@ document.getElementById("ledgerContent").addEventListener("input", function () {
   )} đ`;
 });
 
+// ===== TAB SWITCHING =====
+function initTabs() {
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      // Deactivate all
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+      // Activate clicked
+      btn.classList.add("active");
+      document.getElementById(btn.dataset.tab).classList.add("active");
+    });
+  });
+}
+
 // Cập nhật hàm createGrid để thêm sự kiện DOMContentLoaded
 document.addEventListener("DOMContentLoaded", () => {
   // Khởi tạo grid
   createGrid();
+
+  // Khởi tạo tab switching
+  initTabs();
 
   // Set ngày mặc định là ngày hiện tại
   document.getElementById("ledgerDate").value = getCurrentDate();
@@ -368,6 +532,41 @@ document.addEventListener("DOMContentLoaded", () => {
   const searchInput = document.getElementById("searchInput");
   const debouncedSearch = debounce(searchAnimals, 300);
   searchInput.addEventListener("input", debouncedSearch);
+
+  // Cập nhật gợi ý người ghi
+  updatePersonSuggestions();
+
+  // Cập nhật undo button
+  updateUndoButton();
+
+  // ===== PHÍM TẮT TOÀN CỤC =====
+  document.addEventListener("keydown", (e) => {
+    // Ctrl+F: focus ô tìm kiếm
+    if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+      e.preventDefault();
+      const searchInput = document.getElementById("searchInput");
+      searchInput.focus();
+      searchInput.select();
+    }
+    // Ctrl+Z: undo (khi không đang focus input/textarea)
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.key === "z" &&
+      !["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)
+    ) {
+      e.preventDefault();
+      performUndo();
+    }
+    // Escape: clear search & blur
+    if (e.key === "Escape") {
+      const searchInput = document.getElementById("searchInput");
+      if (document.activeElement === searchInput) {
+        searchInput.value = "";
+        searchAnimals();
+        searchInput.blur();
+      }
+    }
+  });
 });
 
 // Thêm hàm xuất lịch sử
@@ -463,6 +662,7 @@ function saveDataToLocalStorage() {
     lastUpdate: new Date().toLocaleString("vi-VN"),
   };
   localStorage.setItem("coNhonData", JSON.stringify(data));
+  updateLastUpdateBadge();
 }
 
 function loadDataFromLocalStorage() {
@@ -496,6 +696,12 @@ function loadDataFromLocalStorage() {
 
     // Cập nhật tổng tất cả
     calculateTotal();
+
+    // Cập nhật badge lần cuối
+    const badge = document.getElementById("lastUpdateBadge");
+    if (badge && data.lastUpdate) {
+      badge.textContent = `Cập nhật: ${data.lastUpdate}`;
+    }
 
     console.log(`Đã tải dữ liệu (Cập nhật lần cuối: ${data.lastUpdate})`);
   }
@@ -669,7 +875,7 @@ async function exportAsImage() {
     const header = document.createElement("div");
     header.className = "export-header";
     header.innerHTML = `
-            <h1>CỔ NHƠN 2025 - XUÂN ẤT TỴ</h1>
+            <h1>${APP_CONFIG.title}</h1>
             <p>Thời gian xuất: ${new Date().toLocaleString("vi-VN")}</p>
         `;
     container.appendChild(header);
@@ -741,7 +947,7 @@ async function exportAsImage() {
 
     // Tạo tên file với timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `co-nhon-2025_${timestamp}.png`;
+    const fileName = `co-nhon-${APP_CONFIG.year}_${timestamp}.png`;
 
     // Tải ảnh
     const link = document.createElement("a");
