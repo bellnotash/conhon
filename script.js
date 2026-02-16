@@ -233,8 +233,9 @@ function createGrid() {
 
     // Thêm hình ảnh
     const img = document.createElement("img");
-    img.src = `images/item${i + 1}.jpg`;
+    img.src = `./images/item${i + 1}.jpg`;
     img.alt = animals[i].type;
+    img.crossOrigin = "anonymous";
 
     // Thêm tên và số thứ tự
     const name = document.createElement("div");
@@ -861,9 +862,23 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+// ===== HELPER: CHỜ ẢNH LOAD XONG =====
+async function waitForImages(root) {
+  const imgs = Array.from(root.querySelectorAll("img"));
+  if (!imgs.length) return;
+  await Promise.all(
+    imgs.map((img) =>
+      img.complete && img.naturalWidth > 0
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            img.onload = img.onerror = () => resolve();
+          })
+    )
+  );
+}
+
 // Thêm hàm xuất ảnh
 async function exportAsImage() {
-  // Hiển thị loading
   document.querySelector(".loading-overlay").style.display = "flex";
 
   try {
@@ -875,9 +890,9 @@ async function exportAsImage() {
     const header = document.createElement("div");
     header.className = "export-header";
     header.innerHTML = `
-            <h1>${APP_CONFIG.title}</h1>
-            <p>Thời gian xuất: ${new Date().toLocaleString("vi-VN")}</p>
-        `;
+      <h1>${APP_CONFIG.title}</h1>
+      <p>Thời gian xuất: ${new Date().toLocaleString("vi-VN")}</p>
+    `;
     container.appendChild(header);
 
     // Copy grid và chỉ lấy thông tin cần thiết
@@ -888,19 +903,19 @@ async function exportAsImage() {
       const exportCell = document.createElement("div");
       exportCell.className = "cell";
 
-      // Copy ảnh
-      const img = cell.querySelector("img").cloneNode(true);
+      // Copy ảnh — tạo mới với crossOrigin
+      const origImg = cell.querySelector("img");
+      const img = document.createElement("img");
+      img.crossOrigin = "anonymous";
+      img.src = origImg.src;
+      img.alt = origImg.alt;
 
-      // Copy tên và loại
       const name = cell.querySelector(".item-name").cloneNode(true);
-
-      // Lấy tổng tiền
       const total = cell.querySelector(".item-total").cloneNode(true);
 
       exportCell.appendChild(img);
       exportCell.appendChild(name);
       exportCell.appendChild(total);
-
       grid.appendChild(exportCell);
     });
 
@@ -910,20 +925,18 @@ async function exportAsImage() {
     const totalsSection = document.createElement("div");
     totalsSection.className = "export-totals";
 
-    // Thêm tổng cột
     const columnTotals = document.createElement("div");
     columnTotals.className = "export-column-totals";
     for (let i = 0; i < 6; i++) {
       const total = calculateColumnTotal(i);
       columnTotals.innerHTML += `
-                <div class="column-total">
-                    Cột ${i + 1}: ${total.toLocaleString("vi-VN")} đ
-                </div>
-            `;
+        <div class="column-total">
+          Cột ${i + 1}: ${total.toLocaleString("vi-VN")} đ
+        </div>
+      `;
     }
     totalsSection.appendChild(columnTotals);
 
-    // Thêm tổng tất cả
     const grandTotal = document.createElement("div");
     grandTotal.className = "export-grand-total";
     grandTotal.textContent = document.getElementById("totalAmount").textContent;
@@ -936,20 +949,23 @@ async function exportAsImage() {
     container.style.left = "-9999px";
     document.body.appendChild(container);
 
+    // Chờ tất cả ảnh load xong
+    await waitForImages(container);
+
     // Tạo ảnh với html2canvas
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
     const canvas = await html2canvas(container, {
-      scale: 2, // Tăng độ phân giải
-      backgroundColor: "#fff9f0",
+      scale: dpr,
+      backgroundColor: "#f5f6fa",
       logging: false,
-      useCORS: true, // Cho phép load ảnh từ domain khác
-      allowTaint: true,
+      useCORS: true,
+      allowTaint: false,
     });
 
     // Tạo tên file với timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const fileName = `co-nhon-${APP_CONFIG.year}_${timestamp}.png`;
 
-    // Tải ảnh
     const link = document.createElement("a");
     link.download = fileName;
     link.href = canvas.toDataURL("image/png");
@@ -958,13 +974,11 @@ async function exportAsImage() {
     // Dọn dẹp
     document.body.removeChild(container);
 
-    // Hiển thị thông báo thành công
     showNotification("Đã xuất ảnh thành công!");
   } catch (error) {
     console.error("Lỗi khi xuất ảnh:", error);
     showNotification("Có lỗi xảy ra khi xuất ảnh!", "error");
   } finally {
-    // Ẩn loading
     document.querySelector(".loading-overlay").style.display = "none";
   }
 }
