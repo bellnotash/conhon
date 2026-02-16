@@ -558,6 +558,11 @@ textarea.form-control { resize: vertical; min-height: 70px; }
 }
 
 @media (max-width: 860px) {
+  .app-header { padding: 14px 16px 12px; }
+  .app-title { font-size: 1.6rem; letter-spacing: 1px; }
+  .app-subtitle { font-size: .8rem; letter-spacing: 2px; margin-top: 0; }
+  .header-inner { gap: 14px; }
+  .header-deco .lantern { width: 36px; }
   .main-layout {
     grid-template-columns: 1fr;
   }
@@ -566,24 +571,39 @@ textarea.form-control { resize: vertical; min-height: 70px; }
     order: -1;
   }
   .grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .toolbar { padding: 6px 12px; }
   .toolbar-inner {
-    flex-direction: column; align-items: stretch; gap: 8px;
+    flex-direction: row; align-items: center; gap: 6px;
+    flex-wrap: nowrap;
   }
-  .toolbar-left, .toolbar-right { justify-content: center; }
-  .toolbar-right { flex-wrap: wrap; justify-content: center; }
+  .toolbar-left { display: none; }
+  .toolbar-center { flex: 1 1 120px; min-width: 100px; }
+  .toolbar-right {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 4px;
+  }
   .tb-label { display: none; }
-  .app-title { font-size: 1.8rem; }
-  .app-subtitle { font-size: .9rem; letter-spacing: 2px; }
-  .header-deco .lantern { width: 40px; }
+  .tb-btn { padding: 6px 10px; font-size: .78rem; }
+  .search-input { padding: 7px 14px 7px 34px; font-size: .85rem; }
 }
 
 @media (max-width: 560px) {
-  .grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .main-layout { padding: 0 8px; }
-  .app-title { font-size: 1.4rem; }
+  .app-header { padding: 10px 12px 8px; }
+  .app-title { font-size: 1.2rem; letter-spacing: 1px; }
+  .app-subtitle { display: none; }
   .header-deco { display: none; }
+  .toolbar { padding: 5px 8px; }
+  .toolbar-inner { gap: 5px; }
+  .tb-btn { padding: 5px 8px; font-size: .72rem; }
+  .search-input { padding: 6px 12px 6px 30px; font-size: .82rem; }
+  .search-wrapper .search-icon { left: 10px; font-size: .8rem; }
+  .grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .main-layout { padding: 0 8px; margin-top: 10px; }
   .shortcut-hint { display: none; }
-  .tb-btn { padding: 6px 10px; font-size: .76rem; }
   .cell { padding: 8px; }
   .cell img { border-radius: 6px; }
+  .tab-btn { padding: 8px 14px; font-size: .82rem; }
 }
