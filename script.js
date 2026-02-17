@@ -233,6 +233,9 @@ function updateSellerSuggestions() {
 let ledgerData = [];
 let nextEntryId = 1;
 
+// ===== ĐÁNH DẤU ĐÃ CHUNG TIỀN =====
+let paidEntries = {}; // { entryId: true }
+
 // ===== CẬP NHẬT BADGE LẦN CUỐI =====
 function updateLastUpdateBadge() {
   const badge = document.getElementById("lastUpdateBadge");
@@ -854,6 +857,8 @@ function filterWinningEntries() {
 
   const totalHit = matches.reduce((s, m) => s + m.hitSum, 0);
   const totalEntries = matches.length;
+  const paidCount = matches.filter((m) => paidEntries[m.entry.id]).length;
+  const paidSum = matches.filter((m) => paidEntries[m.entry.id]).reduce((s, m) => s + m.hitSum, 0);
 
   // Summary
   const summary = document.createElement('div');
@@ -867,6 +872,16 @@ function filterWinningEntries() {
       <div class="win-stat">
         <div class="win-stat-label"><i class="fas fa-coins"></i> Tổng tiền đánh ${a.type}</div>
         <div class="win-stat-value win-stat-money">${totalHit.toLocaleString('vi-VN')} đ</div>
+      </div>
+    </div>
+    <div id="winPaidSummary" class="win-paid-summary">
+      <div class="win-paid-stat win-paid-done">
+        <i class="fas fa-check-circle"></i>
+        <span>Đã chung: <strong>${paidCount}</strong> phiếu — <strong>${paidSum.toLocaleString('vi-VN')} đ</strong></span>
+      </div>
+      <div class="win-paid-stat win-paid-pending">
+        <i class="far fa-circle"></i>
+        <span>Chưa chung: <strong>${totalEntries - paidCount}</strong> phiếu — <strong>${(totalHit - paidSum).toLocaleString('vi-VN')} đ</strong></span>
       </div>
     </div>
   `;
@@ -894,8 +909,11 @@ function filterWinningEntries() {
       contentHighlighted = contentHighlighted.replace(shortRegex, '<mark class="win-highlight">$1</mark>');
     }
 
+    const isPaid = !!paidEntries[m.entry.id];
     const div = document.createElement('div');
-    div.className = 'win-item';
+    div.className = 'win-item' + (isPaid ? ' win-item-paid' : '');
+    div.dataset.entryId = m.entry.id;
+    div.dataset.hitSum = m.hitSum;
     div.innerHTML = `
       <div class="win-item-header">
         <div class="win-item-meta">
@@ -908,6 +926,9 @@ function filterWinningEntries() {
       </div>
       <div class="win-item-content">${contentHighlighted}</div>
       <div class="win-item-footer">
+        <button class="win-paid-btn${isPaid ? ' is-paid' : ''}" onclick="togglePaidStatus(${m.entry.id})">
+          <i class="${isPaid ? 'fas fa-check-circle' : 'far fa-circle'}"></i> ${isPaid ? 'Đã chung' : 'Chưa chung'}
+        </button>
         <span class="win-item-total-label">Tổng phiếu:</span>
         <span class="win-item-total-value">${m.entry.total.toLocaleString('vi-VN')} đ</span>
       </div>
@@ -919,6 +940,63 @@ function filterWinningEntries() {
   card.style.display = 'block';
 
   showNotification(`Tìm thấy ${totalEntries} phiếu chứa ${a.type}!`);
+}
+
+function togglePaidStatus(entryId) {
+  if (paidEntries[entryId]) {
+    delete paidEntries[entryId];
+  } else {
+    paidEntries[entryId] = true;
+  }
+  saveDataToLocalStorage();
+
+  // Cập nhật UI cho item
+  const itemEl = document.querySelector(`.win-item[data-entry-id="${entryId}"]`);
+  if (itemEl) {
+    itemEl.classList.toggle('win-item-paid', !!paidEntries[entryId]);
+    const btn = itemEl.querySelector('.win-paid-btn');
+    if (btn) {
+      const isPaid = !!paidEntries[entryId];
+      btn.classList.toggle('is-paid', isPaid);
+      btn.innerHTML = isPaid
+        ? '<i class="fas fa-check-circle"></i> Đã chung'
+        : '<i class="far fa-circle"></i> Chưa chung';
+    }
+  }
+
+  // Cập nhật summary
+  updateWinPaidSummary();
+}
+
+function updateWinPaidSummary() {
+  const summaryEl = document.getElementById('winPaidSummary');
+  if (!summaryEl) return;
+
+  const items = document.querySelectorAll('.win-item[data-entry-id]');
+  let paidCount = 0, unpaidCount = 0, paidSum = 0, unpaidSum = 0;
+
+  items.forEach((item) => {
+    const id = Number(item.dataset.entryId);
+    const amount = Number(item.dataset.hitSum) || 0;
+    if (paidEntries[id]) {
+      paidCount++;
+      paidSum += amount;
+    } else {
+      unpaidCount++;
+      unpaidSum += amount;
+    }
+  });
+
+  summaryEl.innerHTML = `
+    <div class="win-paid-stat win-paid-done">
+      <i class="fas fa-check-circle"></i>
+      <span>Đã chung: <strong>${paidCount}</strong> phiếu — <strong>${paidSum.toLocaleString('vi-VN')} đ</strong></span>
+    </div>
+    <div class="win-paid-stat win-paid-pending">
+      <i class="far fa-circle"></i>
+      <span>Chưa chung: <strong>${unpaidCount}</strong> phiếu — <strong>${unpaidSum.toLocaleString('vi-VN')} đ</strong></span>
+    </div>
+  `;
 }
 
 // Thêm sự kiện lắng nghe thay đổi nội dung để tính tổng
@@ -1115,6 +1193,7 @@ function saveDataToLocalStorage() {
     cellHistory: cellHistory,
     ledgerData: ledgerData,
     nextEntryId: nextEntryId,
+    paidEntries: paidEntries,
     lastUpdate: new Date().toLocaleString("vi-VN"),
   };
   localStorage.setItem("coNhonData", JSON.stringify(data));
@@ -1129,11 +1208,17 @@ function loadDataFromLocalStorage() {
     // Khôi phục lịch sử các ô
     cellHistory.splice(0, cellHistory.length, ...data.cellHistory);
 
+    // Khôi phục đánh dấu chung tiền
+    if (data.paidEntries) {
+      paidEntries = data.paidEntries;
+    }
+
     // Khôi phục dữ liệu ghi sổ có cấu trúc
     if (data.ledgerData) {
       ledgerData = data.ledgerData;
       nextEntryId = data.nextEntryId || (ledgerData.length > 0 ? Math.max(...ledgerData.map(e => e.id)) + 1 : 1);
     } else if (data.ledgerEntries) {
+
       // Migration: chuyển từ innerHTML cũ sang cấu trúc mới
       migrateLedgerEntries(data.ledgerEntries);
     }

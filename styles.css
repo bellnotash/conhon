@@ -798,6 +798,64 @@ textarea.form-control { resize: vertical; min-height: 70px; }
 }
 .win-item-total-value { font-weight: 700; color: var(--text); }
 
+/* Đánh dấu đã chung tiền */
+.win-item-paid {
+  border-left-color: #52c41a;
+  background: #f6ffed;
+}
+.win-item-paid .win-item-amount {
+  color: #52c41a;
+  text-decoration: line-through;
+  opacity: .7;
+}
+.win-item-paid .win-item-content {
+  opacity: .6;
+}
+
+.win-paid-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text-light);
+  font-size: .78rem; font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.win-paid-btn:hover {
+  border-color: #52c41a;
+  color: #52c41a;
+  background: #f6ffed;
+}
+.win-paid-btn.is-paid {
+  background: #52c41a;
+  color: #fff;
+  border-color: #52c41a;
+}
+.win-paid-btn.is-paid:hover {
+  background: #389e0d;
+  border-color: #389e0d;
+}
+
+/* Paid summary */
+.win-paid-summary {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.win-paid-stat {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .85rem; color: var(--text-light);
+}
+.win-paid-stat strong { color: var(--text); }
+.win-paid-done i { color: #52c41a; }
+.win-paid-pending i { color: #faad14; }
+
 @media (max-width: 860px) {
   .win-lookup-body {
     grid-template-columns: 1fr 1fr;
