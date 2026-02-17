@@ -856,9 +856,13 @@ function filterWinningEntries() {
   }
 
   const totalHit = matches.reduce((s, m) => s + m.hitSum, 0);
+  const totalPayout = totalHit * 28;
   const totalEntries = matches.length;
   const paidCount = matches.filter((m) => paidEntries[m.entry.id]).length;
   const paidSum = matches.filter((m) => paidEntries[m.entry.id]).reduce((s, m) => s + m.hitSum, 0);
+  const paidPayout = paidSum * 28;
+  const unpaidSum = totalHit - paidSum;
+  const unpaidPayout = unpaidSum * 28;
 
   // Summary
   const summary = document.createElement('div');
@@ -873,15 +877,19 @@ function filterWinningEntries() {
         <div class="win-stat-label"><i class="fas fa-coins"></i> Tổng tiền đánh ${a.type}</div>
         <div class="win-stat-value win-stat-money">${totalHit.toLocaleString('vi-VN')} đ</div>
       </div>
+      <div class="win-stat win-stat-payout">
+        <div class="win-stat-label"><i class="fas fa-hand-holding-dollar"></i> Tiền chung (×28)</div>
+        <div class="win-stat-value win-stat-payout-value">${totalPayout.toLocaleString('vi-VN')} đ</div>
+      </div>
     </div>
     <div id="winPaidSummary" class="win-paid-summary">
       <div class="win-paid-stat win-paid-done">
         <i class="fas fa-check-circle"></i>
-        <span>Đã chung: <strong>${paidCount}</strong> phiếu — <strong>${paidSum.toLocaleString('vi-VN')} đ</strong></span>
+        <span>Đã chung: <strong>${paidCount}</strong> phiếu — <strong>${paidPayout.toLocaleString('vi-VN')} đ</strong></span>
       </div>
       <div class="win-paid-stat win-paid-pending">
         <i class="far fa-circle"></i>
-        <span>Chưa chung: <strong>${totalEntries - paidCount}</strong> phiếu — <strong>${(totalHit - paidSum).toLocaleString('vi-VN')} đ</strong></span>
+        <span>Chưa chung: <strong>${totalEntries - paidCount}</strong> phiếu — <strong>${unpaidPayout.toLocaleString('vi-VN')} đ</strong></span>
       </div>
     </div>
   `;
@@ -910,6 +918,7 @@ function filterWinningEntries() {
     }
 
     const isPaid = !!paidEntries[m.entry.id];
+    const payoutAmount = m.hitSum * 28;
     const div = document.createElement('div');
     div.className = 'win-item' + (isPaid ? ' win-item-paid' : '');
     div.dataset.entryId = m.entry.id;
@@ -922,7 +931,10 @@ function filterWinningEntries() {
           <span class="ledger-entry-person">${escapeHtml(m.entry.person)}</span>
           ${sellerHtml}
         </div>
-        <div class="win-item-amount">+${m.hitSum.toLocaleString('vi-VN')} đ</div>
+        <div class="win-item-amounts">
+          <div class="win-item-amount">+${m.hitSum.toLocaleString('vi-VN')} đ</div>
+          <div class="win-item-payout">×28 = ${payoutAmount.toLocaleString('vi-VN')} đ</div>
+        </div>
       </div>
       <div class="win-item-content">${contentHighlighted}</div>
       <div class="win-item-footer">
@@ -990,11 +1002,11 @@ function updateWinPaidSummary() {
   summaryEl.innerHTML = `
     <div class="win-paid-stat win-paid-done">
       <i class="fas fa-check-circle"></i>
-      <span>Đã chung: <strong>${paidCount}</strong> phiếu — <strong>${paidSum.toLocaleString('vi-VN')} đ</strong></span>
+      <span>Đã chung: <strong>${paidCount}</strong> phiếu — <strong>${(paidSum * 28).toLocaleString('vi-VN')} đ</strong></span>
     </div>
     <div class="win-paid-stat win-paid-pending">
       <i class="far fa-circle"></i>
-      <span>Chưa chung: <strong>${unpaidCount}</strong> phiếu — <strong>${unpaidSum.toLocaleString('vi-VN')} đ</strong></span>
+      <span>Chưa chung: <strong>${unpaidCount}</strong> phiếu — <strong>${(unpaidSum * 28).toLocaleString('vi-VN')} đ</strong></span>
     </div>
   `;
 }

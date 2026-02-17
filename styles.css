@@ -735,7 +735,7 @@ textarea.form-control { resize: vertical; min-height: 70px; }
 }
 .win-summary-grid {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr 1fr;
   gap: 12px;
 }
 .win-stat {
@@ -753,6 +753,12 @@ textarea.form-control { resize: vertical; min-height: 70px; }
   font-size: 1.3rem; font-weight: 800; color: var(--text);
 }
 .win-stat-money { color: #fa541c; }
+.win-stat-payout {
+  background: #fff7e6;
+  border-color: #ffd591;
+}
+.win-stat-payout .win-stat-label { color: #d46b08; }
+.win-stat-payout-value { color: #d46b08 !important; }
 
 .win-list {
   display: flex; flex-direction: column; gap: 10px;
@@ -775,6 +781,14 @@ textarea.form-control { resize: vertical; min-height: 70px; }
 }
 .win-item-amount {
   font-size: 1rem; font-weight: 800; color: #fa541c;
+  white-space: nowrap;
+}
+.win-item-amounts {
+  text-align: right;
+  flex-shrink: 0;
+}
+.win-item-payout {
+  font-size: .82rem; font-weight: 700; color: #d46b08;
   white-space: nowrap;
 }
 .win-item-content {
@@ -807,6 +821,10 @@ textarea.form-control { resize: vertical; min-height: 70px; }
   color: #52c41a;
   text-decoration: line-through;
   opacity: .7;
+}
+.win-item-paid .win-item-payout {
+  text-decoration: line-through;
+  opacity: .5;
 }
 .win-item-paid .win-item-content {
   opacity: .6;
