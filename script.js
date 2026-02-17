@@ -106,7 +106,7 @@ animals.forEach((animal, index) => {
   if (noDiacritics !== type) animalNameToIndex[noDiacritics] = index;
 
   // Thêm tên rút gọn (bỏ "con ", "cá ", "hòn ")
-  const shortForm = type.replace(/^(con |cá |hòn |rồng )/, "");
+  const shortForm = type.replace(/^(con |cá |hòn |rồng |kỳ )/, "");
   if (shortForm !== type) {
     animalNameToIndex[shortForm] = index;
     const shortNoDiacritics = removeVietnameseDiacritics(shortForm);
