@@ -181,6 +181,7 @@ function performUndo() {
     renderLedgerEntries();
     updateSellerSummary();
     updateSellerFilter();
+    updateWinSellerFilter();
     calculateTotal();
     saveDataToLocalStorage();
     showNotification("Đã hoàn tác ghi sổ!");
@@ -459,6 +460,7 @@ function processLedgerEntry() {
   // Cập nhật seller summary + filter
   updateSellerSummary();
   updateSellerFilter();
+  updateWinSellerFilter();
 
   // Lưu + badge
   saveDataToLocalStorage();
@@ -617,6 +619,7 @@ function saveEditedEntry() {
   calculateTotal();
   updateSellerSummary();
   updateSellerFilter();
+  updateWinSellerFilter();
   saveDataToLocalStorage();
   closeEditModal();
   showNotification("Đã cập nhật ghi sổ!");
@@ -642,6 +645,7 @@ function deleteLedgerEntry(entryId) {
   calculateTotal();
   updateSellerSummary();
   updateSellerFilter();
+  updateWinSellerFilter();
   saveDataToLocalStorage();
   showNotification("Đã xóa mục ghi sổ!");
 }
@@ -767,6 +771,16 @@ function updateSellerSummary() {
 }
 
 // ===== TRA CỨU CON XỔ =====
+function updateWinSellerFilter() {
+  const select = document.getElementById('winSeller');
+  if (!select) return;
+  const currentVal = select.value;
+  const sellers = [...new Set(ledgerData.map((e) => e.seller).filter(Boolean))];
+  sellers.sort();
+  select.innerHTML = '<option value="">-- Tất cả --</option>' +
+    sellers.map((s) => `<option value="${s}" ${s === currentVal ? 'selected' : ''}>${s}</option>`).join('');
+}
+
 function populateWinAnimalSelect() {
   const sel = document.getElementById('winAnimal');
   if (!sel) return;
@@ -803,8 +817,10 @@ function filterWinningEntries() {
 
   const animalIdx = Number(animalIndexStr);
   const a = animals[animalIdx];
+  const seller = document.getElementById('winSeller')?.value || '';
   const sessionLabel = session || 'Cả ngày';
-  titleEl.textContent = `Phiếu chứa: ${a.type} (${a.name}) — ${sessionLabel}`;
+  const sellerLabel = seller || 'Tất cả';
+  titleEl.textContent = `Phiếu chứa: ${a.type} (${a.name}) — ${sessionLabel} — NB: ${sellerLabel}`;
 
   // Tìm tất cả phiếu có chứa con này
   const matches = [];
@@ -812,6 +828,8 @@ function filterWinningEntries() {
   ledgerData.forEach((entry) => {
     // Lọc buổi nếu có chọn
     if (session && entry.session !== session) return;
+    // Lọc người bán nếu có chọn
+    if (seller && entry.seller !== seller) return;
 
     // Kiểm tra entries có chứa con xổ không
     const hitItems = (entry.entries || []).filter((e) => {
@@ -954,6 +972,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Khởi tạo dropdown con vật cho tra cứu xổ
   populateWinAnimalSelect();
+  updateWinSellerFilter();
 
   // Cập nhật undo button
   updateUndoButton();
@@ -1144,6 +1163,7 @@ function loadDataFromLocalStorage() {
     renderLedgerEntries();
     updateSellerSummary();
     updateSellerFilter();
+    updateWinSellerFilter();
 
     // Cập nhật badge lần cuối
     const badge = document.getElementById("lastUpdateBadge");
