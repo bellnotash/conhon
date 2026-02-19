@@ -168,6 +168,8 @@ body {
 .tb-warn { background: #e67e22; }
 .tb-blue { background: var(--blue); }
 .tb-green { background: var(--green); }
+.tb-teal { background: #00897b; }
+.tb-orange { background: #e67e22; }
 .tb-danger { background: #e74c3c; }
 
 /* ===== MAIN LAYOUT ===== */
@@ -370,6 +372,13 @@ textarea.form-control { resize: vertical; min-height: 70px; }
 }
 .btn-delete:hover {
   background: #e74c3c; color: #fff;
+  transform: scale(1.1);
+}
+.btn-copy {
+  background: #e8f5e9; color: #388e3c;
+}
+.btn-copy:hover {
+  background: #388e3c; color: #fff;
   transform: scale(1.1);
 }
 .ledger-entry-content {
@@ -855,6 +864,23 @@ textarea.form-control { resize: vertical; min-height: 70px; }
 .win-paid-btn.is-paid:hover {
   background: #389e0d;
   border-color: #389e0d;
+}
+.win-copy-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text-light);
+  font-size: .78rem; font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.win-copy-btn:hover {
+  border-color: #388e3c;
+  color: #388e3c;
+  background: #e8f5e9;
 }
 
 /* Paid summary */

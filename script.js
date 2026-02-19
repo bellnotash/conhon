@@ -511,6 +511,50 @@ function parseContent(content) {
 }
 
 // ===== RENDER LEDGER ENTRIES TỪ DỮ LIỆU CÓ CẤU TRÚC =====
+
+// Format số tiền thành dạng ngắn gọn: 10000 -> "10k", 1000000 -> "1m", 500000 -> "500k"
+function formatMoneyShort(amount) {
+  if (amount >= 1000000 && amount % 1000000 === 0) {
+    return (amount / 1000000) + 'm';
+  }
+  if (amount >= 1000 && amount % 1000 === 0) {
+    return (amount / 1000) + 'k';
+  }
+  return amount.toLocaleString('vi-VN');
+}
+
+// Xuất nội dung entry thành text ngắn gọn: "ong 230k, rồng bay 230k, ..."
+function formatEntryAsText(entry) {
+  if (!entry.entries || entry.entries.length === 0) {
+    return entry.content || '';
+  }
+  return entry.entries.map((e) => {
+    // Tìm tên con vật đầy đủ từ index
+    const idx = animalNameToIndex[e.animal];
+    const animalType = idx != null ? animals[idx].type : e.animal;
+    return `${animalType} ${formatMoneyShort(e.amount)}`;
+  }).join(', ');
+}
+
+async function copyEntryText(entryId) {
+  const entry = ledgerData.find((e) => e.id === entryId);
+  if (!entry) return;
+  const text = formatEntryAsText(entry);
+  try {
+    await navigator.clipboard.writeText(text);
+    showNotification('Đã sao chép nội dung phiếu!');
+  } catch {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showNotification('Đã sao chép nội dung phiếu!');
+  }
+}
+
 function renderLedgerEntries() {
   const container = document.getElementById("ledgerEntries");
   const filterSeller = document.getElementById("sellerFilter")?.value || "";
@@ -541,6 +585,9 @@ function renderLedgerEntries() {
           <span class="ledger-entry-person">${entry.person}</span>
           ${sellerBadge}
           <span class="entry-actions">
+            <button class="btn-entry-action btn-copy" onclick="copyEntryText(${entry.id})" title="Sao chép nội dung">
+              <i class="fas fa-copy"></i>
+            </button>
             <button class="btn-entry-action btn-edit" onclick="openEditModal(${entry.id})" title="Sửa">
               <i class="fas fa-pen"></i>
             </button>
@@ -941,6 +988,9 @@ function filterWinningEntries() {
         <button class="win-paid-btn${isPaid ? ' is-paid' : ''}" onclick="togglePaidStatus(${m.entry.id})">
           <i class="${isPaid ? 'fas fa-check-circle' : 'far fa-circle'}"></i> ${isPaid ? 'Đã chung' : 'Chưa chung'}
         </button>
+        <button class="win-copy-btn" onclick="copyEntryText(${m.entry.id})" title="Sao chép nội dung phiếu">
+          <i class="fas fa-copy"></i> Copy
+        </button>
         <span class="win-item-total-label">Tổng phiếu:</span>
         <span class="win-item-total-value">${m.entry.total.toLocaleString('vi-VN')} đ</span>
       </div>
@@ -1323,6 +1373,75 @@ function clearAllData() {
       toggleLoading(false);
     }
   }
+}
+
+// ===== SAO LƯU & KHÔI PHỤC =====
+function exportBackup() {
+  const raw = localStorage.getItem('coNhonData');
+  if (!raw) {
+    showNotification('Không có dữ liệu để xuất!', 'error');
+    return;
+  }
+  const data = JSON.parse(raw);
+  data._backupDate = new Date().toLocaleString('vi-VN');
+  data._version = 'conhon-2026-v1';
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `conhon-backup-${dateStr}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showNotification(`Đã xuất file sao lưu! (${ledgerData.length} phiếu)`);
+}
+
+function importBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  // Reset input để có thể chọn lại cùng file
+  event.target.value = '';
+
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      const data = JSON.parse(e.target.result);
+
+      // Kiểm tra dữ liệu hợp lệ
+      if (!data.cellHistory || !Array.isArray(data.cellHistory)) {
+        showNotification('File không đúng định dạng sao lưu Cổ Nhơn!', 'error');
+        return;
+      }
+
+      const existingRaw = localStorage.getItem('coNhonData');
+      const hasExisting = existingRaw && JSON.parse(existingRaw).ledgerData?.length > 0;
+
+      const importCount = (data.ledgerData || []).length;
+      const backupInfo = data._backupDate ? ` (sao lưu ngày ${data._backupDate})` : '';
+
+      if (hasExisting) {
+        const choice = confirm(
+          `File chứa ${importCount} phiếu${backupInfo}.\n\n` +
+          `Máy này đang có ${ledgerData.length} phiếu.\n\n` +
+          `Bấm OK = THAY THẾ toàn bộ (xóa dữ liệu cũ)\n` +
+          `Bấm Cancel = HỦY, không nhập`
+        );
+        if (!choice) return;
+      } else {
+        if (!confirm(`Nhập ${importCount} phiếu${backupInfo}?`)) return;
+      }
+
+      toggleLoading(true);
+      localStorage.setItem('coNhonData', JSON.stringify(data));
+      showNotification(`Đã nhập thành công ${importCount} phiếu!`);
+      setTimeout(() => location.reload(), 800);
+    } catch (err) {
+      showNotification('Lỗi đọc file: ' + err.message, 'error');
+    }
+  };
+  reader.readAsText(file);
 }
 
 // Thêm hàm hiển thị thông báo

@@ -74,6 +74,13 @@
           <button onclick="exportAsImage()" class="tb-btn tb-green" title="Xuất ảnh">
             <i class="fas fa-image"></i><span class="tb-label">Ảnh</span>
           </button>
+          <button onclick="exportBackup()" class="tb-btn tb-teal" title="Xuất sao lưu">
+            <i class="fas fa-download"></i><span class="tb-label">Xuất</span>
+          </button>
+          <button onclick="document.getElementById('importFileInput').click()" class="tb-btn tb-orange" title="Nhập sao lưu">
+            <i class="fas fa-upload"></i><span class="tb-label">Nhập</span>
+          </button>
+          <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importBackup(event)" />
           <button onclick="clearAllData()" class="tb-btn tb-danger" title="Xóa tất cả">
             <i class="fas fa-trash-alt"></i><span class="tb-label">Xóa</span>
           </button>
