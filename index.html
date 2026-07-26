@@ -62,6 +62,9 @@
           </div>
         </div>
         <div class="toolbar-right">
+          <button onclick="openProfileModal()" class="tb-btn tb-profile" title="Hồ sơ sổ">
+            <i class="fas fa-user-gear"></i><span class="tb-label" id="profileButtonLabel">Tên sổ</span>
+          </button>
           <button onclick="calculateTotal()" class="tb-btn tb-primary" title="Tính tổng">
             <i class="fas fa-calculator"></i><span class="tb-label">Tổng</span>
           </button>
@@ -74,11 +77,18 @@
           <button onclick="exportAsImage()" class="tb-btn tb-green" title="Xuất ảnh">
             <i class="fas fa-image"></i><span class="tb-label">Ảnh</span>
           </button>
-          <button onclick="exportBackup()" class="tb-btn tb-teal" title="Xuất sao lưu">
-            <i class="fas fa-download"></i><span class="tb-label">Xuất</span>
+          <button id="exportSessionBtn" onclick="exportSessionSummary()" class="tb-btn tb-teal" title="Xuất phiếu tổng theo buổi">
+            <i class="fas fa-paper-plane"></i><span class="tb-label">Xuất buổi</span>
           </button>
-          <button onclick="document.getElementById('importFileInput').click()" class="tb-btn tb-orange" title="Nhập sao lưu">
-            <i class="fas fa-upload"></i><span class="tb-label">Nhập</span>
+          <button onclick="document.getElementById('summaryImportInput').click()" class="tb-btn tb-purple" title="Nhập phiếu tổng từ cấp dưới">
+            <i class="fas fa-file-import"></i><span class="tb-label">Nhập cấp dưới</span>
+          </button>
+          <input type="file" id="summaryImportInput" accept=".json" style="display:none" onchange="importSessionSummary(event)" />
+          <button onclick="exportBackup()" class="tb-btn tb-gray" title="Sao lưu toàn bộ dữ liệu của máy">
+            <i class="fas fa-download"></i><span class="tb-label">Sao lưu</span>
+          </button>
+          <button onclick="document.getElementById('importFileInput').click()" class="tb-btn tb-orange" title="Khôi phục sao lưu toàn bộ">
+            <i class="fas fa-upload"></i><span class="tb-label">Khôi phục</span>
           </button>
           <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importBackup(event)" />
           <button onclick="clearAllData()" class="tb-btn tb-danger" title="Xóa tất cả">
@@ -142,8 +152,28 @@
                 id="ledgerContent"
                 class="form-control"
                 rows="3"
-                placeholder="VD: cá trắng 50k, ốc 100k, thỏ 0.5m"
+                placeholder="VD: lân 50 chó 50, ốc 100 (số ngắn tính theo nghìn)"
               ></textarea>
+            </div>
+            <div class="form-row">
+              <label><i class="fas fa-wallet"></i> Thanh toán</label>
+              <div class="payment-selector">
+                <label class="payment-chip payment-cash">
+                  <input type="radio" name="paymentType" value="cash" checked />
+                  <span><i class="fas fa-money-bill-wave"></i> Tiền mặt</span>
+                </label>
+                <label class="payment-chip payment-transfer">
+                  <input type="radio" name="paymentType" value="bank_transfer" />
+                  <span><i class="fas fa-building-columns"></i> CK</span>
+                </label>
+                <label class="payment-chip payment-debt">
+                  <input type="radio" name="paymentType" value="debt" />
+                  <span><i class="fas fa-clock"></i> Nợ</span>
+                </label>
+              </div>
+            </div>
+            <div class="parse-preview" id="parsePreview">
+              <div class="parse-preview-empty">Nhập nội dung để xem kết quả nhận dạng</div>
             </div>
             <div class="form-total-row">
               <span class="form-total-label">Tổng cộng:</span>
@@ -159,12 +189,34 @@
 
       <!-- RIGHT: Tabs -->
       <section class="content">
+        <div class="view-filter-bar">
+          <div class="view-date-control">
+            <label for="viewDate"><i class="far fa-calendar-alt"></i> Ngày đang xem</label>
+            <input type="date" id="viewDate" class="form-control" />
+            <button type="button" class="btn-today" onclick="goToToday()">Hôm nay</button>
+          </div>
+          <div class="view-session-selector" id="viewSessionSelector">
+            <button type="button" class="view-session-btn active" data-session="Sáng">
+              <i class="fas fa-sun"></i> Sáng
+            </button>
+            <button type="button" class="view-session-btn" data-session="Chiều">
+              <i class="fas fa-moon"></i> Chiều
+            </button>
+            <button type="button" class="view-session-btn" data-session="">
+              <i class="fas fa-calendar-day"></i> Cả ngày
+            </button>
+          </div>
+          <div class="storage-usage" id="storageUsage">Dữ liệu: 0 KB</div>
+        </div>
         <div class="tab-bar">
           <button class="tab-btn active" data-tab="gridTab">
             <i class="fas fa-th"></i> Bảng Con Vật
           </button>
           <button class="tab-btn" data-tab="historyTab">
             <i class="fas fa-history"></i> Lịch Sử Ghi Sổ
+          </button>
+          <button class="tab-btn" data-tab="financeTab">
+            <i class="fas fa-chart-column"></i> Doanh Thu & Công Nợ
           </button>
         </div>
 
@@ -237,6 +289,43 @@
             <div class="card-body" id="ledgerEntries"></div>
           </div>
         </div>
+
+        <div class="tab-panel" id="financeTab">
+          <div class="finance-grid">
+            <div class="finance-stat finance-total">
+              <span class="finance-label">Tổng ghi sổ</span>
+              <strong id="financeGrandTotal">0 đ</strong>
+            </div>
+            <div class="finance-stat finance-collected">
+              <span class="finance-label">Tiền đã thu trực tiếp</span>
+              <strong id="financeCollected">0 đ</strong>
+            </div>
+            <div class="finance-stat finance-cash">
+              <span class="finance-label">Tiền mặt</span>
+              <strong id="financeCash">0 đ</strong>
+            </div>
+            <div class="finance-stat finance-transfer">
+              <span class="finance-label">Chuyển khoản</span>
+              <strong id="financeTransfer">0 đ</strong>
+            </div>
+            <div class="finance-stat finance-debt">
+              <span class="finance-label">Khách nợ</span>
+              <strong id="financeDebt">0 đ</strong>
+            </div>
+            <div class="finance-stat finance-imported">
+              <span class="finance-label">Từ cấp dưới</span>
+              <strong id="financeImported">0 đ</strong>
+            </div>
+          </div>
+          <div class="card debt-card">
+            <div class="card-header"><i class="fas fa-file-invoice-dollar"></i> Danh Sách Công Nợ</div>
+            <div class="card-body" id="debtList"></div>
+          </div>
+          <div class="card source-card">
+            <div class="card-header"><i class="fas fa-sitemap"></i> Tổng Theo Nguồn Dữ Liệu</div>
+            <div class="card-body" id="sourceSummary"></div>
+          </div>
+        </div>
       </section>
     </main>
 
@@ -278,6 +367,15 @@
             <label><i class="far fa-edit"></i> Nội dung</label>
             <textarea id="editContent" class="form-control" rows="3" placeholder="VD: cá trắng 50k, ốc 100k"></textarea>
           </div>
+          <div class="form-row">
+            <label><i class="fas fa-wallet"></i> Thanh toán</label>
+            <select id="editPaymentType" class="form-control">
+              <option value="cash">Tiền mặt</option>
+              <option value="bank_transfer">Chuyển khoản</option>
+              <option value="debt">Nợ</option>
+              <option value="unknown">Chưa xác định</option>
+            </select>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn-modal btn-modal-cancel" onclick="closeEditModal()">
@@ -285,6 +383,35 @@
           </button>
           <button class="btn-modal btn-modal-save" onclick="saveEditedEntry()">
             <i class="fas fa-save"></i> Lưu thay đổi
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Local profile modal -->
+    <div class="modal-overlay" id="profileModal">
+      <div class="modal-content profile-modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-address-card"></i> Hồ Sơ Sổ</h3>
+          <button class="modal-close" onclick="closeProfileModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="profile-help">
+            Tên này được ghi vào phiếu tổng khi xuất cho cấp trên. Đây không phải tài khoản đăng nhập.
+          </p>
+          <div class="form-row">
+            <label for="profileName"><i class="fas fa-signature"></i> Tên sổ</label>
+            <input type="text" id="profileName" class="form-control" maxlength="80" placeholder="VD: Sổ của Thiện" />
+          </div>
+          <div class="profile-id-row">
+            <span>Mã sổ:</span>
+            <code id="profileIdDisplay"></code>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-modal btn-modal-cancel" onclick="closeProfileModal()">Hủy</button>
+          <button class="btn-modal btn-modal-save" onclick="saveLocalProfile()">
+            <i class="fas fa-save"></i> Lưu hồ sơ
           </button>
         </div>
       </div>

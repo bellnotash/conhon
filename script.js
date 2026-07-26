@@ -51,14 +51,15 @@ const APP_CONFIG = {
 };
 
 // ===== HÀM PARSE TIỀN ĐA ĐỊNH DẠNG =====
-// Hỗ trợ: 50k, 50K, 0.5m, 50.000, 50,000, 50000, +50k, -50k
-function parseMoney(str) {
+// Hỗ trợ: 50k, 50K, 0.5m, 50.000, 50,000, 50000, +50k, -50k.
+// Trong ô ghi sổ, số nguyên ngắn mặc định là nghìn: 50 = 50.000đ.
+function parseMoney(str, shortNumberAsThousands = false) {
   if (!str) return 0;
-  str = str.toString().trim().toLowerCase();
+  str = str.toString().trim().toLowerCase().replace(/\s+/g, "");
   if (!str) return 0;
 
   // Bỏ dấu +/- (chỉ cho phép số dương)
-  str = str.replace(/^[\+\-]/, "").trim();
+  str = str.replace(/^[\+\-]/, "");
 
   // Hậu tố "m" (triệu)
   if (str.endsWith("m")) {
@@ -83,9 +84,13 @@ function parseMoney(str) {
     return Math.abs(parseInt(str.replace(/,/g, "")));
   }
 
-  // Số thuần
+  // Số thuần. Khi nhập nội dung ghi sổ: 1..999 được hiểu là nghìn.
   const num = parseInt(str);
-  return isNaN(num) ? 0 : Math.abs(num);
+  if (isNaN(num)) return 0;
+  const absolute = Math.abs(num);
+  return shortNumberAsThousands && /^\d+$/.test(str) && absolute < 1000
+    ? absolute * 1000
+    : absolute;
 }
 
 // ===== BỎ DẤU TIẾNG VIỆT =====
@@ -139,53 +144,25 @@ function performUndo() {
     return;
   }
   const action = undoStack.pop();
-  const cells = document.querySelectorAll(".cell");
-
-  if (action.type === "cell") {
-    const cell = cells[action.index];
-    const itemTotal = cell.querySelector(".item-total");
-    // Trừ lại số tiền đã cộng
-    const currentTotal = parseInt(itemTotal.dataset.total || 0);
-    const newTotal = currentTotal - action.amount;
-    itemTotal.dataset.total = newTotal;
-    itemTotal.textContent = `Tổng: ${newTotal.toLocaleString("vi-VN")} đ`;
-    // Xóa record cuối trong lịch sử ô
-    cellHistory[action.index].pop();
-    const history = cell.querySelector(".history");
-    updateHistory(history, cellHistory[action.index]);
-    calculateColumnTotal(action.index % 6);
-    calculateTotal();
-    saveDataToLocalStorage();
-    showNotification(`Đã hoàn tác: ${animals[action.index].type}`);
-  } else if (action.type === "ledger") {
-    // Hoàn tác nhiều ô từ ghi sổ
-    action.entries.forEach((entry) => {
-      const idx = animalNameToIndex[entry.animal];
-      if (idx !== undefined) {
-        const cell = cells[idx];
-        const itemTotal = cell.querySelector(".item-total");
-        const currentTotal = parseInt(itemTotal.dataset.total || 0);
-        const newTotal = currentTotal - entry.amount;
-        itemTotal.dataset.total = newTotal;
-        itemTotal.textContent = `Tổng: ${newTotal.toLocaleString("vi-VN")} đ`;
-        cellHistory[idx].pop();
-        const history = cell.querySelector(".history");
-        updateHistory(history, cellHistory[idx]);
-        calculateColumnTotal(idx % 6);
-      }
-    });
-    // Xóa ledger entry đầu tiên (mới nhất)
-    if (ledgerData.length > 0) {
-      ledgerData.shift();
-    }
-    renderLedgerEntries();
-    updateSellerSummary();
-    updateSellerFilter();
-    updateWinSellerFilter();
-    calculateTotal();
-    saveDataToLocalStorage();
+  if (action.type === "add_entry") {
+    ledgerData = ledgerData.filter((entry) => String(entry.id) !== String(action.entryId));
     showNotification("Đã hoàn tác ghi sổ!");
+  } else if (action.type === "restore_entry") {
+    ledgerData.splice(
+      Math.min(action.index, ledgerData.length),
+      0,
+      JSON.parse(JSON.stringify(action.entry))
+    );
+    showNotification("Đã khôi phục phiếu vừa xóa!");
+  } else if (action.type === "edit_entry") {
+    const index = ledgerData.findIndex(
+      (entry) => String(entry.id) === String(action.entry.id)
+    );
+    if (index !== -1) ledgerData[index] = JSON.parse(JSON.stringify(action.entry));
+    showNotification("Đã hoàn tác chỉnh sửa!");
   }
+  refreshAllViews();
+  saveDataToLocalStorage();
   updateUndoButton();
 }
 
@@ -205,7 +182,7 @@ function updatePersonSuggestions() {
   const datalist = document.getElementById("personSuggestions");
   if (!datalist) return;
   datalist.innerHTML = recentPersons
-    .map((p) => `<option value="${p}">`)
+    .map((p) => `<option value="${escapeHtml(p)}">`)
     .join("");
 }
 
@@ -225,13 +202,55 @@ function updateSellerSuggestions() {
   const datalist = document.getElementById("sellerSuggestions");
   if (!datalist) return;
   datalist.innerHTML = recentSellers
-    .map((s) => `<option value="${s}">`)
+    .map((s) => `<option value="${escapeHtml(s)}">`)
     .join("");
 }
 
 // ===== DỮ LIỆU GHI SỔ CÓ CẤU TRÚC =====
 let ledgerData = [];
 let nextEntryId = 1;
+const DATA_VERSION = 2;
+const SUMMARY_FILE_TYPE = "conhon-session-summary";
+let activeViewDate = getCurrentDate();
+let activeViewSession = new Date().getHours() < 12 ? "Sáng" : "Chiều";
+let lastKnownToday = getCurrentDate();
+
+function createUuid() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function loadLocalProfile() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("coNhonProfile") || "null");
+    if (saved?.id) return saved;
+  } catch (error) {
+    console.warn("Không đọc được hồ sơ sổ:", error);
+  }
+  const profile = { id: createUuid(), name: "" };
+  localStorage.setItem("coNhonProfile", JSON.stringify(profile));
+  return profile;
+}
+
+let localProfile = loadLocalProfile();
+
+function findEntryById(entryId) {
+  return ledgerData.find((entry) => String(entry.id) === String(entryId));
+}
+
+function isDirectEntry(entry) {
+  return entry.entryType !== "child_summary";
+}
+
+function getVisibleEntries() {
+  return ledgerData.filter(
+    (entry) =>
+      entry.date === activeViewDate &&
+      (!activeViewSession || entry.session === activeViewSession)
+  );
+}
 
 // ===== ĐÁNH DẤU ĐÃ CHUNG TIỀN =====
 let paidEntries = {}; // { entryId: true }
@@ -322,10 +341,10 @@ function updateHistory(historyDiv, cellHistory) {
       (record) =>
         `<div class="history-item">
           <span class="history-time">
-            ${record.time}
+            ${escapeHtml(record.time || "")}
             ${
               record.session
-                ? `<span class="history-session">(${record.session})</span>`
+                ? `<span class="history-session">(${escapeHtml(record.session)})</span>`
                 : ""
             }
           </span>
@@ -372,6 +391,52 @@ function calculateTotal() {
   ).textContent = `Tổng: ${total.toLocaleString("vi-VN")} đ`;
 }
 
+function rebuildGridFromLedgerData() {
+  for (let index = 0; index < cellHistory.length; index++) {
+    cellHistory[index] = [];
+  }
+
+  getVisibleEntries().forEach((entry) => {
+    (entry.entries || []).forEach((item) => {
+      const index = animalNameToIndex[item.animal];
+      if (index === undefined) return;
+      cellHistory[index].push({
+        entryId: entry.id,
+        time: entry.createdAt
+          ? new Date(entry.createdAt).toLocaleString("vi-VN")
+          : entry.date,
+        session: entry.session,
+        amount: Number(item.amount) || 0,
+        person: entry.person || "",
+        seller: entry.seller || "",
+      });
+    });
+  });
+
+  document.querySelectorAll(".cell").forEach((cell, index) => {
+    const history = cellHistory[index];
+    const total = history.reduce((sum, record) => sum + record.amount, 0);
+    const itemTotal = cell.querySelector(".item-total");
+    itemTotal.dataset.total = total;
+    itemTotal.textContent = `Tổng: ${total.toLocaleString("vi-VN")} đ`;
+    updateHistory(cell.querySelector(".history"), history);
+  });
+
+  for (let column = 0; column < 6; column++) calculateColumnTotal(column);
+  calculateTotal();
+}
+
+function refreshAllViews() {
+  rebuildGridFromLedgerData();
+  updateSellerFilter();
+  renderLedgerEntries();
+  updateSellerSummary();
+  updateWinSellerFilter();
+  updateFinanceDashboard();
+  updateExportSessionButton();
+  updateStorageUsage();
+}
+
 // Cập nhật hàm processLedgerEntry để lấy giá trị radio button
 function processLedgerEntry() {
   const date = document.getElementById("ledgerDate").value;
@@ -379,62 +444,32 @@ function processLedgerEntry() {
   const person = document.getElementById("ledgerPerson").value;
   const seller = document.getElementById("ledgerSeller").value;
   const content = document.getElementById("ledgerContent").value;
+  const paymentType =
+    document.querySelector('input[name="paymentType"]:checked')?.value || "";
 
-  if (!date || !person || !content) {
+  if (!date || !person || !content || !paymentType) {
     alert("Vui lòng điền đầy đủ thông tin!");
     return;
   }
 
   // Xử lý nội dung và cập nhật các ô
-  const entries = parseContent(content);
+  const parsed = parseContentDetailed(content);
+  const entries = parsed.entries;
   if (entries.length === 0) {
     showNotification("Không tìm thấy con vật hoặc số tiền hợp lệ!", "error");
     return;
   }
+  if (parsed.errors.length > 0) {
+    showNotification("Còn nội dung chưa nhận dạng. Vui lòng kiểm tra lại!", "error");
+    renderParsePreview(entries, parsed.errors);
+    return;
+  }
 
-  let total = 0;
-
-  // Lưu undo cho toàn bộ lần ghi sổ
-  pushUndo({ type: "ledger", entries: entries.map((e) => ({ ...e })) });
-
-  entries.forEach((entry) => {
-    const { animal, amount } = entry;
-    total += amount;
-
-    // Cập nhật số tiền vào ô tương ứng
-    if (animalNameToIndex.hasOwnProperty(animal)) {
-      const index = animalNameToIndex[animal];
-      const cell = document.querySelectorAll(".cell")[index];
-      const itemTotal = cell.querySelector(".item-total");
-      const currentTotal = parseInt(itemTotal.dataset.total || 0);
-      const newTotal = currentTotal + amount;
-
-      // Cập nhật tổng tiền của ô
-      itemTotal.dataset.total = newTotal;
-      itemTotal.textContent = `Tổng: ${newTotal.toLocaleString("vi-VN")} đ`;
-
-      // Thêm vào lịch sử của ô
-      const currentTime = new Date().toLocaleString("vi-VN");
-      cellHistory[index].push({
-        time: currentTime,
-        session: session,
-        amount: amount,
-        person: person,
-        seller: seller,
-      });
-
-      // Cập nhật hiển thị lịch sử
-      const history = cell.querySelector(".history");
-      updateHistory(history, cellHistory[index]);
-
-      // Cập nhật tổng cột
-      calculateColumnTotal(index % 6);
-    }
-  });
+  const total = entries.reduce((sum, entry) => sum + entry.amount, 0);
 
   // Thêm vào dữ liệu ghi sổ
   const entryRecord = {
-    id: nextEntryId++,
+    id: createUuid(),
     date,
     session,
     person,
@@ -442,102 +477,172 @@ function processLedgerEntry() {
     content,
     total,
     entries: entries.map((e) => ({ ...e })),
+    paymentType,
+    entryType: "direct",
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   ledgerData.unshift(entryRecord);
-
-  // Render lại lịch sử
-  renderLedgerEntries();
+  pushUndo({ type: "add_entry", entryId: entryRecord.id });
 
   // Lưu tên người ghi + người bán gần nhất
   addRecentPerson(person);
   addRecentSeller(seller);
 
+  activeViewDate = date;
+  activeViewSession = session;
+  syncViewControls();
+
   // Reset form
   document.getElementById("ledgerContent").value = "";
   document.getElementById("ledgerTotal").textContent = "0 đ";
-
-  // Auto tính tổng chung
-  calculateTotal();
-
-  // Cập nhật seller summary + filter
-  updateSellerSummary();
-  updateSellerFilter();
-  updateWinSellerFilter();
+  renderParsePreview([]);
 
   // Lưu + badge
+  refreshAllViews();
   saveDataToLocalStorage();
   updateLastUpdateBadge();
 
   showNotification("Đã ghi sổ thành công!");
 }
 
-// Hàm phân tích nội dung ghi sổ (cải tiến)
-function parseContent(content) {
+// Hàm phân tích nội dung ghi sổ.
+// Hỗ trợ cả:
+//   "lân 50 chó 50"
+//   "lân 50, chó 50"
+//   "kỳ lân 50k; chó 50.000"
+function parseContentDetailed(content) {
   const entries = [];
-  const patterns = content
-    .toLowerCase()
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  const errors = [];
+  const normalizedContent = (content || "").toLowerCase();
+  const moneyPattern = /[\+\-]?\s*\d+(?:(?:[\.,]\d+)+)?[km]?/gi;
+  let segmentStart = 0;
+  let moneyMatch;
 
-  patterns.forEach((pattern) => {
-    // Tìm số tiền ở cuối chuỗi (hỗ trợ 50k, 100K, 0.5m, 50.000, 50000)
-    const moneyMatch = pattern.match(/([\+\-]?\s*\d[\d.,]*[km]?)\s*$/i);
-    if (moneyMatch) {
-      const amount = parseMoney(moneyMatch[1]);
-      if (amount === 0) return;
+  while ((moneyMatch = moneyPattern.exec(normalizedContent)) !== null) {
+    const amount = parseMoney(moneyMatch[0], true);
+    const animalPart = normalizedContent
+      .slice(segmentStart, moneyMatch.index)
+      .replace(/^[\s,;|]+|[\s,;|]+$/g, "")
+      .trim();
+    const animalPartNoDiacritics = removeVietnameseDiacritics(animalPart);
 
-      // Phần tên con vật (trước số tiền)
-      const animalPart = pattern
-        .replace(moneyMatch[0], "")
-        .trim();
-      const animalPartNoDiacritics = removeVietnameseDiacritics(animalPart);
-
-      // Match theo alias dài nhất trước
-      for (const [animal, index] of sortedAnimalEntries) {
+    let matched = false;
+    if (amount > 0 && animalPart) {
+      // Match alias dài nhất trước để ưu tiên "rồng bay" hơn "bay".
+      for (const [animal] of sortedAnimalEntries) {
         if (
           animalPart.includes(animal) ||
           animalPartNoDiacritics.includes(animal)
         ) {
           entries.push({ animal, amount });
+          matched = true;
           break;
         }
       }
     }
-  });
+    if (!matched) {
+      const fragment = `${animalPart} ${moneyMatch[0]}`.trim();
+      errors.push(fragment || moneyMatch[0].trim());
+    }
 
-  return entries;
+    segmentStart = moneyPattern.lastIndex;
+  }
+
+  const trailing = normalizedContent
+    .slice(segmentStart)
+    .replace(/[\s,;|]+/g, " ")
+    .trim();
+  if (trailing) errors.push(trailing);
+
+  return { entries, errors };
+}
+
+function parseContent(content) {
+  return parseContentDetailed(content).entries;
+}
+
+function getAnimalNoteName(animalKey) {
+  const index = animalNameToIndex[animalKey];
+  if (index === undefined) return animalKey;
+  return animals[index].type
+    .toLowerCase()
+    .replace(/^(con |cá |hòn |kỳ )/, "");
+}
+
+function formatAmountForNote(amount) {
+  if (amount % 1000 === 0) return String(amount / 1000);
+  return amount.toLocaleString("vi-VN");
+}
+
+function renderParsePreview(entries, errors = []) {
+  const preview = document.getElementById("parsePreview");
+  if (!preview) return;
+  if (entries.length === 0 && errors.length === 0) {
+    preview.innerHTML =
+      '<div class="parse-preview-empty">Nhập nội dung để xem kết quả nhận dạng</div>';
+    return;
+  }
+
+  const validRows = entries
+    .map(
+      (entry) => `
+        <div class="parse-preview-row">
+          <span class="parse-preview-name"><i class="fas fa-check-circle"></i>${escapeHtml(getAnimalNoteName(entry.animal))}</span>
+          <span class="parse-preview-amount">${entry.amount.toLocaleString("vi-VN")} đ</span>
+        </div>`
+    )
+    .join("");
+  const errorRows = errors
+    .map(
+      (error) => `
+        <div class="parse-preview-row">
+          <span class="parse-preview-name" style="color:var(--primary)"><i class="fas fa-triangle-exclamation" style="color:var(--primary)"></i>Không hiểu: ${escapeHtml(error)}</span>
+        </div>`
+    )
+    .join("");
+  preview.innerHTML = validRows + errorRows;
 }
 
 // ===== RENDER LEDGER ENTRIES TỪ DỮ LIỆU CÓ CẤU TRÚC =====
 
-// Format số tiền thành dạng ngắn gọn: 10000 -> "10k", 1000000 -> "1m", 500000 -> "500k"
-function formatMoneyShort(amount) {
-  if (amount >= 1000000 && amount % 1000000 === 0) {
-    return (amount / 1000000) + 'm';
-  }
-  if (amount >= 1000 && amount % 1000 === 0) {
-    return (amount / 1000) + 'k';
-  }
-  return amount.toLocaleString('vi-VN');
-}
-
-// Xuất nội dung entry thành text ngắn gọn: "ong 230k, rồng bay 230k, ..."
+// Xuất nội dung entry thành từng dòng ngắn gọn như nội dung ghi chú.
 function formatEntryAsText(entry) {
   if (!entry.entries || entry.entries.length === 0) {
     return entry.content || '';
   }
   return entry.entries.map((e) => {
-    // Tìm tên con vật đầy đủ từ index
-    const idx = animalNameToIndex[e.animal];
-    const animalType = idx != null ? animals[idx].type : e.animal;
-    return `${animalType} ${formatMoneyShort(e.amount)}`;
-  }).join(', ');
+    return `${getAnimalNoteName(e.animal)} ${formatAmountForNote(e.amount)}`;
+  }).join('\n');
+}
+
+function formatEntryLinesHtml(entry) {
+  if (!entry.entries || entry.entries.length === 0) {
+    return `<div>${escapeHtml(entry.content || "")}</div>`;
+  }
+  return entry.entries
+    .map(
+      (item) => `
+        <div class="ledger-content-line">
+          <span>${escapeHtml(getAnimalNoteName(item.animal))}</span>
+          <span>${escapeHtml(formatAmountForNote(item.amount))}</span>
+        </div>`
+    )
+    .join("");
+}
+
+function getPaymentMeta(paymentType) {
+  const map = {
+    cash: { label: "Tiền mặt", icon: "fa-money-bill-wave" },
+    bank_transfer: { label: "Chuyển khoản", icon: "fa-building-columns" },
+    debt: { label: "Nợ", icon: "fa-clock" },
+    unknown: { label: "Chưa xác định", icon: "fa-circle-question" },
+  };
+  return map[paymentType] || map.unknown;
 }
 
 async function copyEntryText(entryId) {
-  const entry = ledgerData.find((e) => e.id === entryId);
+  const entry = findEntryById(entryId);
   if (!entry) return;
   const text = formatEntryAsText(entry);
   try {
@@ -560,9 +665,10 @@ function renderLedgerEntries() {
   const filterSeller = document.getElementById("sellerFilter")?.value || "";
 
   // Lọc theo người bán nếu có
+  const visibleEntries = getVisibleEntries();
   const filtered = filterSeller
-    ? ledgerData.filter((e) => e.seller === filterSeller)
-    : ledgerData;
+    ? visibleEntries.filter((e) => e.seller === filterSeller)
+    : visibleEntries;
 
   if (filtered.length === 0) {
     container.innerHTML = '<div style="text-align:center;color:var(--text-light);padding:20px;">Chưa có dữ liệu ghi sổ</div>';
@@ -572,31 +678,48 @@ function renderLedgerEntries() {
   container.innerHTML = filtered.map((entry) => {
     const sessionIcon = entry.session === "Sáng" ? "fa-sun" : "fa-moon";
     const sellerBadge = entry.seller
-      ? `<span class="ledger-entry-seller"><i class="fas fa-store"></i> ${entry.seller}</span>`
+      ? `<span class="ledger-entry-seller"><i class="fas fa-store"></i> ${escapeHtml(entry.seller)}</span>`
       : '';
+    const isImported = !isDirectEntry(entry);
+    const sourceBadge = isImported
+      ? `<span class="ledger-entry-source"><i class="fas fa-sitemap"></i> ${escapeHtml(entry.sourceProfileName || entry.person || "Cấp dưới")}</span>`
+      : "";
+    const personBadge = isImported
+      ? ""
+      : `<span class="ledger-entry-person">${escapeHtml(entry.person || "")}</span>`;
+    const payment = getPaymentMeta(entry.paymentType);
+    const paymentBadge = isImported
+      ? ""
+      : `<span class="payment-badge payment-badge-${escapeHtml(entry.paymentType || "unknown")}"><i class="fas ${payment.icon}"></i> ${payment.label}</span>`;
+    const safeId = escapeHtml(String(entry.id));
+    const editButton = isImported
+      ? ""
+      : `<button class="btn-entry-action btn-edit" onclick="openEditModal('${safeId}')" title="Sửa">
+           <i class="fas fa-pen"></i>
+         </button>`;
     return `
       <div class="ledger-entry" data-id="${entry.id}">
         <div class="ledger-entry-header">
-          <span class="ledger-entry-date">${entry.date}</span>
+          <span class="ledger-entry-date">${escapeHtml(entry.date)}</span>
           <span class="ledger-entry-session">
             <i class="fas ${sessionIcon}"></i>
-            ${entry.session}
+            ${escapeHtml(entry.session)}
           </span>
-          <span class="ledger-entry-person">${entry.person}</span>
+          ${personBadge}
           ${sellerBadge}
+          ${sourceBadge}
+          ${paymentBadge}
           <span class="entry-actions">
-            <button class="btn-entry-action btn-copy" onclick="copyEntryText(${entry.id})" title="Sao chép nội dung">
+            <button class="btn-entry-action btn-copy" onclick="copyEntryText('${safeId}')" title="Sao chép nội dung">
               <i class="fas fa-copy"></i>
             </button>
-            <button class="btn-entry-action btn-edit" onclick="openEditModal(${entry.id})" title="Sửa">
-              <i class="fas fa-pen"></i>
-            </button>
-            <button class="btn-entry-action btn-delete" onclick="deleteLedgerEntry(${entry.id})" title="Xóa">
+            ${editButton}
+            <button class="btn-entry-action btn-delete" onclick="deleteLedgerEntry('${safeId}')" title="Xóa">
               <i class="fas fa-trash"></i>
             </button>
           </span>
         </div>
-        <div class="ledger-entry-content">${entry.content}</div>
+        <div class="ledger-entry-content">${formatEntryLinesHtml(entry)}</div>
         <div class="ledger-entry-total">Tổng cộng: ${entry.total.toLocaleString("vi-VN")} đ</div>
       </div>
     `;
@@ -605,14 +728,19 @@ function renderLedgerEntries() {
 
 // ===== EDIT MODAL =====
 function openEditModal(entryId) {
-  const entry = ledgerData.find((e) => e.id === entryId);
+  const entry = findEntryById(entryId);
   if (!entry) return;
+  if (!isDirectEntry(entry)) {
+    showNotification("Phiếu cấp dưới chỉ được cập nhật bằng cách import lại!", "error");
+    return;
+  }
 
   document.getElementById("editEntryId").value = entryId;
   document.getElementById("editDate").value = entry.date;
   document.getElementById("editPerson").value = entry.person;
   document.getElementById("editSeller").value = entry.seller || "";
   document.getElementById("editContent").value = entry.content;
+  document.getElementById("editPaymentType").value = entry.paymentType || "unknown";
 
   // Set session radio
   const sessionRadios = document.querySelectorAll('input[name="editSession"]');
@@ -628,8 +756,8 @@ function closeEditModal() {
 }
 
 function saveEditedEntry() {
-  const entryId = parseInt(document.getElementById("editEntryId").value);
-  const entry = ledgerData.find((e) => e.id === entryId);
+  const entryId = document.getElementById("editEntryId").value;
+  const entry = findEntryById(entryId);
   if (!entry) return;
 
   const newDate = document.getElementById("editDate").value;
@@ -637,22 +765,26 @@ function saveEditedEntry() {
   const newPerson = document.getElementById("editPerson").value;
   const newSeller = document.getElementById("editSeller").value;
   const newContent = document.getElementById("editContent").value;
+  const newPaymentType = document.getElementById("editPaymentType").value;
 
   if (!newDate || !newPerson || !newContent) {
     alert("Vui lòng điền đầy đủ thông tin!");
     return;
   }
 
-  const newEntries = parseContent(newContent);
+  const parsed = parseContentDetailed(newContent);
+  const newEntries = parsed.entries;
   if (newEntries.length === 0) {
     showNotification("Không tìm thấy con vật hoặc số tiền hợp lệ!", "error");
     return;
   }
+  if (parsed.errors.length > 0) {
+    showNotification("Nội dung sửa còn phần chưa nhận dạng!", "error");
+    return;
+  }
 
-  // 1. Rollback: trừ lại các amount cũ khỏi cellHistory và cell totals
-  rollbackEntry(entry);
+  pushUndo({ type: "edit_entry", entry: JSON.parse(JSON.stringify(entry)) });
 
-  // 2. Apply: cập nhật entry mới và cộng lại
   const newTotal = newEntries.reduce((sum, e) => sum + e.amount, 0);
   entry.date = newDate;
   entry.session = newSession;
@@ -661,15 +793,10 @@ function saveEditedEntry() {
   entry.content = newContent;
   entry.total = newTotal;
   entry.entries = newEntries;
+  entry.paymentType = newPaymentType;
+  entry.updatedAt = new Date().toISOString();
 
-  applyEntry(entry);
-
-  // 3. Re-render
-  renderLedgerEntries();
-  calculateTotal();
-  updateSellerSummary();
-  updateSellerFilter();
-  updateWinSellerFilter();
+  refreshAllViews();
   saveDataToLocalStorage();
   closeEditModal();
   showNotification("Đã cập nhật ghi sổ!");
@@ -679,78 +806,21 @@ function saveEditedEntry() {
 function deleteLedgerEntry(entryId) {
   if (!confirm("Bạn có chắc muốn xóa mục ghi sổ này?")) return;
 
-  const entryIndex = ledgerData.findIndex((e) => e.id === entryId);
+  const entryIndex = ledgerData.findIndex((e) => String(e.id) === String(entryId));
   if (entryIndex === -1) return;
 
   const entry = ledgerData[entryIndex];
 
-  // Rollback cell amounts
-  rollbackEntry(entry);
-
-  // Remove from ledgerData
+  pushUndo({
+    type: "restore_entry",
+    entry: JSON.parse(JSON.stringify(entry)),
+    index: entryIndex,
+  });
   ledgerData.splice(entryIndex, 1);
 
-  // Re-render
-  renderLedgerEntries();
-  calculateTotal();
-  updateSellerSummary();
-  updateSellerFilter();
-  updateWinSellerFilter();
+  refreshAllViews();
   saveDataToLocalStorage();
   showNotification("Đã xóa mục ghi sổ!");
-}
-
-// ===== ROLLBACK / APPLY HELPERS =====
-function rollbackEntry(entry) {
-  const cells = document.querySelectorAll(".cell");
-  (entry.entries || []).forEach((e) => {
-    const idx = animalNameToIndex[e.animal];
-    if (idx === undefined) return;
-    const cell = cells[idx];
-    const itemTotal = cell.querySelector(".item-total");
-    const currentTotal = parseInt(itemTotal.dataset.total || 0);
-    itemTotal.dataset.total = currentTotal - e.amount;
-    itemTotal.textContent = `Tổng: ${(currentTotal - e.amount).toLocaleString("vi-VN")} đ`;
-
-    // Remove matching cellHistory record
-    const histArr = cellHistory[idx];
-    for (let i = histArr.length - 1; i >= 0; i--) {
-      if (histArr[i].amount === e.amount && histArr[i].person === entry.person && histArr[i].session === entry.session) {
-        histArr.splice(i, 1);
-        break;
-      }
-    }
-
-    const history = cell.querySelector(".history");
-    updateHistory(history, cellHistory[idx]);
-    calculateColumnTotal(idx % 6);
-  });
-}
-
-function applyEntry(entry) {
-  const cells = document.querySelectorAll(".cell");
-  const currentTime = new Date().toLocaleString("vi-VN");
-  (entry.entries || []).forEach((e) => {
-    const idx = animalNameToIndex[e.animal];
-    if (idx === undefined) return;
-    const cell = cells[idx];
-    const itemTotal = cell.querySelector(".item-total");
-    const currentTotal = parseInt(itemTotal.dataset.total || 0);
-    itemTotal.dataset.total = currentTotal + e.amount;
-    itemTotal.textContent = `Tổng: ${(currentTotal + e.amount).toLocaleString("vi-VN")} đ`;
-
-    cellHistory[idx].push({
-      time: currentTime,
-      session: entry.session,
-      amount: e.amount,
-      person: entry.person,
-      seller: entry.seller,
-    });
-
-    const history = cell.querySelector(".history");
-    updateHistory(history, cellHistory[idx]);
-    calculateColumnTotal(idx % 6);
-  });
 }
 
 // ===== SELLER FILTER =====
@@ -764,11 +834,18 @@ function updateSellerFilter() {
   const currentVal = select.value;
 
   // Lấy danh sách sellers duy nhất
-  const sellers = [...new Set(ledgerData.map((e) => e.seller).filter(Boolean))];
+  const sellers = [
+    ...new Set(
+      getVisibleEntries()
+        .filter(isDirectEntry)
+        .map((e) => e.seller)
+        .filter(Boolean)
+    ),
+  ];
   sellers.sort();
 
   select.innerHTML = '<option value="">-- Tất cả --</option>' +
-    sellers.map((s) => `<option value="${s}" ${s === currentVal ? 'selected' : ''}>${s}</option>`).join("");
+    sellers.map((s) => `<option value="${escapeHtml(s)}" ${s === currentVal ? 'selected' : ''}>${escapeHtml(s)}</option>`).join("");
 }
 
 // ===== SELLER SUMMARY =====
@@ -779,7 +856,7 @@ function updateSellerSummary() {
 
   // Group by seller
   const sellerTotals = {};
-  ledgerData.forEach((entry) => {
+  getVisibleEntries().filter(isDirectEntry).forEach((entry) => {
     const seller = entry.seller || "(Không rõ)";
     if (!sellerTotals[seller]) sellerTotals[seller] = 0;
     sellerTotals[seller] += entry.total;
@@ -803,7 +880,7 @@ function updateSellerSummary() {
       <tbody>
         ${sellers.map(([seller, total]) => `
           <tr>
-            <td><i class="fas fa-store"></i> ${seller}</td>
+            <td><i class="fas fa-store"></i> ${escapeHtml(seller)}</td>
             <td class="seller-total-amount">${total.toLocaleString("vi-VN")} đ</td>
             <td>${grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0}%</td>
           </tr>
@@ -825,10 +902,17 @@ function updateWinSellerFilter() {
   const select = document.getElementById('winSeller');
   if (!select) return;
   const currentVal = select.value;
-  const sellers = [...new Set(ledgerData.map((e) => e.seller).filter(Boolean))];
+  const sellers = [
+    ...new Set(
+      getVisibleEntries()
+        .filter(isDirectEntry)
+        .map((e) => e.seller)
+        .filter(Boolean)
+    ),
+  ];
   sellers.sort();
   select.innerHTML = '<option value="">-- Tất cả --</option>' +
-    sellers.map((s) => `<option value="${s}" ${s === currentVal ? 'selected' : ''}>${s}</option>`).join('');
+    sellers.map((s) => `<option value="${escapeHtml(s)}" ${s === currentVal ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
 }
 
 function populateWinAnimalSelect() {
@@ -870,12 +954,13 @@ function filterWinningEntries() {
   const seller = document.getElementById('winSeller')?.value || '';
   const sessionLabel = session || 'Cả ngày';
   const sellerLabel = seller || 'Tất cả';
-  titleEl.textContent = `Phiếu chứa: ${a.type} (${a.name}) — ${sessionLabel} — NB: ${sellerLabel}`;
+  titleEl.textContent = `Phiếu chứa: ${a.type} (${a.name}) — ${activeViewDate} — ${sessionLabel} — NB: ${sellerLabel}`;
 
   // Tìm tất cả phiếu có chứa con này
   const matches = [];
 
   ledgerData.forEach((entry) => {
+    if (entry.date !== activeViewDate) return;
     // Lọc buổi nếu có chọn
     if (session && entry.session !== session) return;
     // Lọc người bán nếu có chọn
@@ -985,10 +1070,10 @@ function filterWinningEntries() {
       </div>
       <div class="win-item-content">${contentHighlighted}</div>
       <div class="win-item-footer">
-        <button class="win-paid-btn${isPaid ? ' is-paid' : ''}" onclick="togglePaidStatus(${m.entry.id})">
+        <button class="win-paid-btn${isPaid ? ' is-paid' : ''}" onclick="togglePaidStatus('${escapeHtml(String(m.entry.id))}')">
           <i class="${isPaid ? 'fas fa-check-circle' : 'far fa-circle'}"></i> ${isPaid ? 'Đã chung' : 'Chưa chung'}
         </button>
-        <button class="win-copy-btn" onclick="copyEntryText(${m.entry.id})" title="Sao chép nội dung phiếu">
+        <button class="win-copy-btn" onclick="copyEntryText('${escapeHtml(String(m.entry.id))}')" title="Sao chép nội dung phiếu">
           <i class="fas fa-copy"></i> Copy
         </button>
         <span class="win-item-total-label">Tổng phiếu:</span>
@@ -1038,7 +1123,7 @@ function updateWinPaidSummary() {
   let paidCount = 0, unpaidCount = 0, paidSum = 0, unpaidSum = 0;
 
   items.forEach((item) => {
-    const id = Number(item.dataset.entryId);
+    const id = item.dataset.entryId;
     const amount = Number(item.dataset.hitSum) || 0;
     if (paidEntries[id]) {
       paidCount++;
@@ -1063,11 +1148,13 @@ function updateWinPaidSummary() {
 
 // Thêm sự kiện lắng nghe thay đổi nội dung để tính tổng
 document.getElementById("ledgerContent").addEventListener("input", function () {
-  const entries = parseContent(this.value);
+  const parsed = parseContentDetailed(this.value);
+  const entries = parsed.entries;
   const total = entries.reduce((sum, entry) => sum + entry.amount, 0);
   document.getElementById("ledgerTotal").textContent = `${total.toLocaleString(
     "vi-VN"
   )} đ`;
+  renderParsePreview(entries, parsed.errors);
 });
 
 // ===== TAB SWITCHING =====
@@ -1084,6 +1171,429 @@ function initTabs() {
   });
 }
 
+function syncViewControls() {
+  const viewDate = document.getElementById("viewDate");
+  if (viewDate) viewDate.value = activeViewDate;
+  document.querySelectorAll(".view-session-btn").forEach((button) => {
+    button.classList.toggle("active", button.dataset.session === activeViewSession);
+  });
+
+  const winSession = document.getElementById("winSession");
+  if (winSession) winSession.value = activeViewSession;
+  if (activeViewSession) {
+    const entrySession = document.querySelector(
+      `input[name="session"][value="${activeViewSession}"]`
+    );
+    if (entrySession) entrySession.checked = true;
+  }
+}
+
+function setActiveView(date, session) {
+  activeViewDate = date || getCurrentDate();
+  activeViewSession = session;
+  syncViewControls();
+  refreshAllViews();
+}
+
+function goToToday() {
+  setActiveView(getCurrentDate(), activeViewSession);
+  document.getElementById("ledgerDate").value = getCurrentDate();
+}
+
+function initViewControls() {
+  const viewDate = document.getElementById("viewDate");
+  viewDate.value = activeViewDate;
+  viewDate.addEventListener("change", () => {
+    if (!viewDate.value) return;
+    activeViewDate = viewDate.value;
+    document.getElementById("ledgerDate").value = viewDate.value;
+    refreshAllViews();
+  });
+
+  document.querySelectorAll(".view-session-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeViewSession = button.dataset.session;
+      syncViewControls();
+      refreshAllViews();
+    });
+  });
+  syncViewControls();
+}
+
+function updateExportSessionButton() {
+  const button = document.getElementById("exportSessionBtn");
+  if (!button) return;
+  button.disabled = !activeViewSession;
+  button.title = activeViewSession
+    ? `Xuất phiếu tổng ${activeViewSession.toLowerCase()} ngày ${activeViewDate}`
+    : "Chọn buổi Sáng hoặc Chiều để xuất";
+}
+
+function setMoneyText(id, amount) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = `${amount.toLocaleString("vi-VN")} đ`;
+}
+
+function updateFinanceDashboard() {
+  const visible = getVisibleEntries();
+  const direct = visible.filter(isDirectEntry);
+  const imported = visible.filter((entry) => !isDirectEntry(entry));
+  const sumEntries = (entries) =>
+    entries.reduce((sum, entry) => sum + (Number(entry.total) || 0), 0);
+
+  const cash = sumEntries(direct.filter((entry) => entry.paymentType === "cash"));
+  const transfer = sumEntries(
+    direct.filter((entry) => entry.paymentType === "bank_transfer")
+  );
+  const debtEntries = direct.filter((entry) => entry.paymentType === "debt");
+  const debt = sumEntries(debtEntries);
+
+  setMoneyText("financeGrandTotal", sumEntries(visible));
+  setMoneyText("financeCash", cash);
+  setMoneyText("financeTransfer", transfer);
+  setMoneyText("financeDebt", debt);
+  setMoneyText("financeCollected", cash + transfer);
+  setMoneyText("financeImported", sumEntries(imported));
+
+  const debtList = document.getElementById("debtList");
+  if (debtList) {
+    if (debtEntries.length === 0) {
+      debtList.innerHTML = '<div class="empty-state">Không có phiếu nợ trong thời gian đang xem</div>';
+    } else {
+      debtList.innerHTML = `
+        <table class="debt-table">
+          <thead><tr><th>Ngày</th><th>Buổi</th><th>Khách</th><th>Người bán</th><th>Số tiền</th></tr></thead>
+          <tbody>
+            ${debtEntries
+              .map(
+                (entry) => `
+                  <tr>
+                    <td>${escapeHtml(entry.date)}</td>
+                    <td>${escapeHtml(entry.session)}</td>
+                    <td>${escapeHtml(entry.person || "")}</td>
+                    <td>${escapeHtml(entry.seller || "")}</td>
+                    <td class="debt-amount">${entry.total.toLocaleString("vi-VN")} đ</td>
+                  </tr>`
+              )
+              .join("")}
+          </tbody>
+          <tfoot><tr><td colspan="4"><strong>Tổng nợ</strong></td><td class="debt-amount">${debt.toLocaleString("vi-VN")} đ</td></tr></tfoot>
+        </table>`;
+    }
+  }
+
+  const sourceSummary = document.getElementById("sourceSummary");
+  if (sourceSummary) {
+    const sourceMap = new Map();
+    visible.forEach((entry) => {
+      const sourceId = isDirectEntry(entry)
+        ? localProfile.id
+        : entry.sourceProfileId || "imported";
+      const sourceName = isDirectEntry(entry)
+        ? localProfile.name || "Dữ liệu tự nhập"
+        : entry.sourceProfileName || entry.person || "Cấp dưới";
+      const current = sourceMap.get(sourceId) || { name: sourceName, total: 0, count: 0 };
+      current.total += Number(entry.total) || 0;
+      current.count++;
+      sourceMap.set(sourceId, current);
+    });
+
+    if (sourceMap.size === 0) {
+      sourceSummary.innerHTML = '<div class="empty-state">Chưa có dữ liệu theo nguồn</div>';
+    } else {
+      sourceSummary.innerHTML = `
+        <table class="source-summary-table">
+          <thead><tr><th>Nguồn</th><th>Số phiếu</th><th>Tổng tiền</th></tr></thead>
+          <tbody>
+            ${Array.from(sourceMap.values())
+              .sort((a, b) => b.total - a.total)
+              .map(
+                (source) => `
+                  <tr>
+                    <td>${escapeHtml(source.name)}</td>
+                    <td>${source.count}</td>
+                    <td class="debt-amount">${source.total.toLocaleString("vi-VN")} đ</td>
+                  </tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>`;
+    }
+  }
+}
+
+function updateStorageUsage() {
+  const element = document.getElementById("storageUsage");
+  if (!element) return;
+  const raw = localStorage.getItem("coNhonData") || "";
+  const bytes = new Blob([raw]).size;
+  const maxBytes = 5 * 1024 * 1024;
+  const percent = Math.min(100, (bytes / maxBytes) * 100);
+  const sizeLabel =
+    bytes >= 1024 * 1024
+      ? `${(bytes / 1024 / 1024).toFixed(2)} MB`
+      : `${Math.ceil(bytes / 1024)} KB`;
+  element.textContent = `Dữ liệu: ${sizeLabel} (${percent.toFixed(1)}%)`;
+  element.classList.toggle("storage-warning", percent >= 70 && percent < 90);
+  element.classList.toggle("storage-danger", percent >= 90);
+}
+
+function openProfileModal() {
+  document.getElementById("profileName").value = localProfile.name || "";
+  document.getElementById("profileIdDisplay").textContent = localProfile.id;
+  document.getElementById("profileModal").classList.add("show");
+}
+
+function closeProfileModal() {
+  document.getElementById("profileModal").classList.remove("show");
+}
+
+function updateProfileButton() {
+  const label = document.getElementById("profileButtonLabel");
+  if (label) label.textContent = localProfile.name || "Tên sổ";
+}
+
+function saveLocalProfile() {
+  const name = document.getElementById("profileName").value.trim();
+  if (!name) {
+    showNotification("Vui lòng nhập tên sổ!", "error");
+    return;
+  }
+  localProfile.name = name;
+  localStorage.setItem("coNhonProfile", JSON.stringify(localProfile));
+  updateProfileButton();
+  updateFinanceDashboard();
+  closeProfileModal();
+  showNotification("Đã lưu hồ sơ sổ!");
+}
+
+function getSessionEntries(date, session) {
+  return ledgerData.filter(
+    (entry) => entry.date === date && entry.session === session
+  );
+}
+
+function aggregateEntriesByAnimal(entries) {
+  const totals = Array(animals.length).fill(0);
+  entries.forEach((entry) => {
+    (entry.entries || []).forEach((item) => {
+      const index = animalNameToIndex[item.animal];
+      if (index !== undefined) totals[index] += Number(item.amount) || 0;
+    });
+  });
+  return totals
+    .map((amount, index) => ({
+      animalId: animals[index].id,
+      animalType: animals[index].type,
+      amount,
+    }))
+    .filter((item) => item.amount > 0);
+}
+
+function simpleHash(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function downloadJson(data, fileName) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportSessionSummary() {
+  if (!activeViewSession) {
+    showNotification("Chọn buổi Sáng hoặc Chiều để xuất!", "error");
+    return;
+  }
+  if (!localProfile.name) {
+    openProfileModal();
+    showNotification("Cần đặt tên sổ trước khi xuất!", "error");
+    return;
+  }
+
+  const sessionEntries = getSessionEntries(activeViewDate, activeViewSession);
+  const items = aggregateEntriesByAnimal(sessionEntries);
+  if (items.length === 0) {
+    showNotification("Buổi đang chọn chưa có dữ liệu để xuất!", "error");
+    return;
+  }
+
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+  const summaryKey = `${localProfile.id}|${activeViewDate}|${activeViewSession}`;
+  const signature = simpleHash(
+    JSON.stringify({ summaryKey, items: items.map(({ animalId, amount }) => ({ animalId, amount })) })
+  );
+  const data = {
+    type: SUMMARY_FILE_TYPE,
+    version: DATA_VERSION,
+    summaryKey,
+    signature,
+    source: { id: localProfile.id, name: localProfile.name },
+    date: activeViewDate,
+    session: activeViewSession,
+    exportedAt: new Date().toISOString(),
+    items,
+    total,
+  };
+
+  const safeName = localProfile.name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "so";
+  const sessionSlug = activeViewSession === "Sáng" ? "sang" : "chieu";
+  downloadJson(data, `phieu-tong-${safeName}-${activeViewDate}-${sessionSlug}.json`);
+  showNotification(`Đã xuất phiếu tổng buổi ${activeViewSession.toLowerCase()}!`);
+}
+
+function validateSummaryData(data) {
+  if (!data || data.type !== SUMMARY_FILE_TYPE) {
+    throw new Error("Không phải file phiếu tổng Cổ Nhơn");
+  }
+  if (!data.source?.id || !data.source?.name || !data.date) {
+    throw new Error("File thiếu thông tin nguồn hoặc ngày");
+  }
+  if (!["Sáng", "Chiều"].includes(data.session)) {
+    throw new Error("Buổi trong file không hợp lệ");
+  }
+  if (!Array.isArray(data.items) || data.items.length === 0) {
+    throw new Error("File không có dữ liệu tổng theo con");
+  }
+
+  const seenAnimals = new Set();
+  const entries = data.items.map((item) => {
+    const index = animals.findIndex((animal) => animal.id === String(item.animalId));
+    const amount = Number(item.amount);
+    if (index === -1 || !Number.isSafeInteger(amount) || amount <= 0) {
+      throw new Error("File có con vật hoặc số tiền không hợp lệ");
+    }
+    if (seenAnimals.has(item.animalId)) {
+      throw new Error("File có con vật bị lặp");
+    }
+    seenAnimals.add(item.animalId);
+    return { animal: animals[index].type.toLowerCase(), amount };
+  });
+
+  const calculatedTotal = entries.reduce((sum, item) => sum + item.amount, 0);
+  if (Number(data.total) !== calculatedTotal) {
+    throw new Error("Tổng tiền trong file không khớp chi tiết");
+  }
+  const summaryKey = `${data.source.id}|${data.date}|${data.session}`;
+  const calculatedSignature = simpleHash(
+    JSON.stringify({
+      summaryKey,
+      items: data.items.map((item) => ({
+        animalId: String(item.animalId),
+        amount: Number(item.amount),
+      })),
+    })
+  );
+  if (data.signature && data.signature !== calculatedSignature) {
+    throw new Error("Nội dung file đã thay đổi hoặc không còn hợp lệ");
+  }
+  return { entries, total: calculatedTotal, summaryKey, signature: calculatedSignature };
+}
+
+function importSessionSummary(event) {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (loadEvent) => {
+    try {
+      const data = JSON.parse(loadEvent.target.result);
+      const normalized = validateSummaryData(data);
+      if (data.source.id === localProfile.id) {
+        throw new Error("Không thể import phiếu do chính sổ này xuất");
+      }
+
+      const existing = ledgerData.find(
+        (entry) =>
+          entry.entryType === "child_summary" &&
+          entry.sourceProfileId === data.source.id &&
+          entry.date === data.date &&
+          entry.session === data.session
+      );
+      if (existing?.sourceSignature === normalized.signature) {
+        showNotification("Phiếu tổng này đã được nhập, không cộng trùng!", "error");
+        return;
+      }
+
+      const actionText = existing
+        ? `Cập nhật phiếu cũ ${existing.total.toLocaleString("vi-VN")} đ thành ${normalized.total.toLocaleString("vi-VN")} đ?`
+        : `Nhập phiếu tổng ${normalized.total.toLocaleString("vi-VN")} đ?`;
+      if (
+        !confirm(
+          `Nguồn: ${data.source.name}\nNgày: ${data.date}\nBuổi: ${data.session}\n\n${actionText}`
+        )
+      ) {
+        return;
+      }
+
+      if (existing) {
+        pushUndo({ type: "edit_entry", entry: JSON.parse(JSON.stringify(existing)) });
+        existing.person = data.source.name;
+        existing.content = normalized.entries
+          .map((item) => `${getAnimalNoteName(item.animal)} ${formatAmountForNote(item.amount)}`)
+          .join("\n");
+        existing.total = normalized.total;
+        existing.entries = normalized.entries;
+        existing.sourceProfileName = data.source.name;
+        existing.sourceSignature = normalized.signature;
+        existing.sourceExportedAt = data.exportedAt || new Date().toISOString();
+        existing.updatedAt = new Date().toISOString();
+      } else {
+        const importedEntry = {
+          id: createUuid(),
+          date: data.date,
+          session: data.session,
+          person: data.source.name,
+          seller: "",
+          content: normalized.entries
+            .map((item) => `${getAnimalNoteName(item.animal)} ${formatAmountForNote(item.amount)}`)
+            .join("\n"),
+          total: normalized.total,
+          entries: normalized.entries,
+          paymentType: null,
+          entryType: "child_summary",
+          sourceProfileId: data.source.id,
+          sourceProfileName: data.source.name,
+          sourceSummaryKey: normalized.summaryKey,
+          sourceSignature: normalized.signature,
+          sourceExportedAt: data.exportedAt || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        ledgerData.unshift(importedEntry);
+        pushUndo({ type: "add_entry", entryId: importedEntry.id });
+      }
+
+      activeViewDate = data.date;
+      activeViewSession = data.session;
+      syncViewControls();
+      refreshAllViews();
+      saveDataToLocalStorage();
+      showNotification(existing ? "Đã cập nhật phiếu cấp dưới!" : "Đã nhập phiếu cấp dưới!");
+    } catch (error) {
+      showNotification(`Không thể nhập: ${error.message}`, "error");
+    }
+  };
+  reader.readAsText(file);
+}
+
 // Cập nhật hàm createGrid để thêm sự kiện DOMContentLoaded
 document.addEventListener("DOMContentLoaded", () => {
   // Khởi tạo grid
@@ -1091,6 +1601,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Khởi tạo tab switching
   initTabs();
+  initViewControls();
+  updateProfileButton();
 
   // Set ngày mặc định là ngày hiện tại
   document.getElementById("ledgerDate").value = getCurrentDate();
@@ -1116,6 +1628,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Cập nhật undo button
   updateUndoButton();
+  renderParsePreview([]);
+
+  setInterval(() => {
+    const today = getCurrentDate();
+    if (today !== lastKnownToday) {
+      const wasViewingToday = activeViewDate === lastKnownToday;
+      lastKnownToday = today;
+      if (wasViewingToday) {
+        activeViewDate = today;
+        document.getElementById("ledgerDate").value = today;
+        syncViewControls();
+        refreshAllViews();
+        showNotification("Đã chuyển sang ngày mới!");
+      }
+    }
+  }, 60000);
 
   // ===== PHÍM TẮT TOÀN CỤC =====
   document.addEventListener("keydown", (e) => {
@@ -1152,15 +1680,27 @@ async function exportHistory() {
   try {
     toggleLoading(true);
     // Tạo dữ liệu cho sheet lịch sử ghi sổ (từ ledgerData)
-    const ledgerSheetData = [["Ngày", "Buổi", "Người Mua", "Người Bán", "Nội Dung", "Tổng Tiền"]];
+    const ledgerSheetData = [[
+      "Ngày",
+      "Buổi",
+      "Người Mua/Nguồn",
+      "Người Bán",
+      "Loại Dữ Liệu",
+      "Thanh Toán",
+      "Nội Dung",
+      "Tổng Tiền",
+    ]];
 
-    ledgerData.forEach((entry) => {
+    const visibleEntries = getVisibleEntries();
+    visibleEntries.forEach((entry) => {
       ledgerSheetData.push([
         entry.date,
         entry.session,
         entry.person,
         entry.seller || "",
-        entry.content,
+        isDirectEntry(entry) ? "Trực tiếp" : "Tổng từ cấp dưới",
+        isDirectEntry(entry) ? getPaymentMeta(entry.paymentType).label : "",
+        formatEntryAsText(entry),
         entry.total,
       ]);
     });
@@ -1202,7 +1742,7 @@ async function exportHistory() {
     // Tạo dữ liệu cho sheet tổng theo người bán
     const sellerSummaryData = [["Người Bán", "Tổng Tiền", "Số Lần Ghi"]];
     const sellerMap = {};
-    ledgerData.forEach((entry) => {
+    visibleEntries.filter(isDirectEntry).forEach((entry) => {
       const seller = entry.seller || "(Không rõ)";
       if (!sellerMap[seller]) sellerMap[seller] = { total: 0, count: 0 };
       sellerMap[seller].total += entry.total;
@@ -1252,73 +1792,88 @@ async function exportHistory() {
 // Thêm các hàm để lưu và tải dữ liệu
 function saveDataToLocalStorage() {
   const data = {
-    cellHistory: cellHistory,
+    version: DATA_VERSION,
     ledgerData: ledgerData,
-    nextEntryId: nextEntryId,
     paidEntries: paidEntries,
     lastUpdate: new Date().toLocaleString("vi-VN"),
   };
-  localStorage.setItem("coNhonData", JSON.stringify(data));
-  updateLastUpdateBadge();
+  try {
+    localStorage.setItem("coNhonData", JSON.stringify(data));
+    updateLastUpdateBadge();
+    updateStorageUsage();
+  } catch (error) {
+    if (error?.name === "QuotaExceededError") {
+      showNotification("Bộ nhớ trình duyệt đã đầy. Hãy xuất sao lưu và dọn dữ liệu cũ!", "error");
+    } else {
+      showNotification("Không thể lưu dữ liệu vào trình duyệt!", "error");
+    }
+    throw error;
+  }
+}
+
+function normalizeLedgerEntry(entry) {
+  const normalizedItems = Array.isArray(entry.entries)
+    ? entry.entries
+        .map((item) => ({
+          animal: item.animal,
+          amount: Number(item.amount) || 0,
+        }))
+        .filter(
+          (item) =>
+            item.amount > 0 && animalNameToIndex[item.animal] !== undefined
+        )
+    : parseContent(entry.content || "");
+  const calculatedTotal = normalizedItems.reduce(
+    (sum, item) => sum + item.amount,
+    0
+  );
+  return {
+    ...entry,
+    id: entry.id ?? createUuid(),
+    date: entry.date || getCurrentDate(),
+    session: entry.session === "Chiều" ? "Chiều" : "Sáng",
+    person: entry.person || "",
+    seller: entry.seller || "",
+    content: entry.content || formatEntryAsText({ entries: normalizedItems }),
+    total: calculatedTotal || Number(entry.total) || 0,
+    entries: normalizedItems,
+    paymentType:
+      entry.entryType === "child_summary"
+        ? null
+        : entry.paymentType || "unknown",
+    entryType: entry.entryType || "direct",
+    createdAt: entry.createdAt || new Date().toISOString(),
+    updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
+  };
 }
 
 function loadDataFromLocalStorage() {
   const savedData = localStorage.getItem("coNhonData");
-  if (savedData) {
+  if (!savedData) {
+    refreshAllViews();
+    return;
+  }
+  try {
     const data = JSON.parse(savedData);
+    paidEntries = data.paidEntries || {};
 
-    // Khôi phục lịch sử các ô
-    cellHistory.splice(0, cellHistory.length, ...data.cellHistory);
-
-    // Khôi phục đánh dấu chung tiền
-    if (data.paidEntries) {
-      paidEntries = data.paidEntries;
-    }
-
-    // Khôi phục dữ liệu ghi sổ có cấu trúc
-    if (data.ledgerData) {
-      ledgerData = data.ledgerData;
-      nextEntryId = data.nextEntryId || (ledgerData.length > 0 ? Math.max(...ledgerData.map(e => e.id)) + 1 : 1);
+    if (Array.isArray(data.ledgerData)) {
+      ledgerData = data.ledgerData.map(normalizeLedgerEntry);
     } else if (data.ledgerEntries) {
-
-      // Migration: chuyển từ innerHTML cũ sang cấu trúc mới
       migrateLedgerEntries(data.ledgerEntries);
+      ledgerData = ledgerData.map(normalizeLedgerEntry);
     }
 
-    // Cập nhật tổng tiền cho từng ô
-    document.querySelectorAll(".cell").forEach((cell, index) => {
-      const history = cellHistory[index];
-      const total = history.reduce((sum, record) => sum + record.amount, 0);
-      const itemTotal = cell.querySelector(".item-total");
-      itemTotal.dataset.total = total;
-      itemTotal.textContent = `Tổng: ${total.toLocaleString("vi-VN")} đ`;
-
-      // Cập nhật lịch sử hiển thị
-      const historyDiv = cell.querySelector(".history");
-      updateHistory(historyDiv, history);
-    });
-
-    // Cập nhật tổng các cột
-    for (let i = 0; i < 6; i++) {
-      calculateColumnTotal(i);
-    }
-
-    // Cập nhật tổng tất cả
-    calculateTotal();
-
-    // Render lịch sử ghi sổ
-    renderLedgerEntries();
-    updateSellerSummary();
-    updateSellerFilter();
-    updateWinSellerFilter();
-
-    // Cập nhật badge lần cuối
+    refreshAllViews();
     const badge = document.getElementById("lastUpdateBadge");
     if (badge && data.lastUpdate) {
       badge.textContent = `Cập nhật: ${data.lastUpdate}`;
     }
-
     console.log(`Đã tải dữ liệu (Cập nhật lần cuối: ${data.lastUpdate})`);
+  } catch (error) {
+    console.error("Không thể tải dữ liệu:", error);
+    showNotification("Dữ liệu trình duyệt bị lỗi. Hãy khôi phục từ file sao lưu!", "error");
+    refreshAllViews();
   }
 }
 
@@ -1384,16 +1939,11 @@ function exportBackup() {
   }
   const data = JSON.parse(raw);
   data._backupDate = new Date().toLocaleString('vi-VN');
-  data._version = 'conhon-2026-v1';
-
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  data._version = `conhon-2026-v${DATA_VERSION}`;
+  data._type = "conhon-full-backup";
+  data._profile = localProfile;
   const dateStr = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `conhon-backup-${dateStr}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadJson(data, `conhon-backup-${dateStr}.json`);
   showNotification(`Đã xuất file sao lưu! (${ledgerData.length} phiếu)`);
 }
 
@@ -1410,7 +1960,10 @@ function importBackup(event) {
       const data = JSON.parse(e.target.result);
 
       // Kiểm tra dữ liệu hợp lệ
-      if (!data.cellHistory || !Array.isArray(data.cellHistory)) {
+      const hasLedgerData = Array.isArray(data.ledgerData);
+      const isLegacyBackup =
+        Array.isArray(data.cellHistory) || typeof data.ledgerEntries === "string";
+      if (!hasLedgerData && !isLegacyBackup) {
         showNotification('File không đúng định dạng sao lưu Cổ Nhơn!', 'error');
         return;
       }
@@ -1435,6 +1988,9 @@ function importBackup(event) {
 
       toggleLoading(true);
       localStorage.setItem('coNhonData', JSON.stringify(data));
+      if (data._profile?.id) {
+        localStorage.setItem("coNhonProfile", JSON.stringify(data._profile));
+      }
       showNotification(`Đã nhập thành công ${importCount} phiếu!`);
       setTimeout(() => location.reload(), 800);
     } catch (err) {
