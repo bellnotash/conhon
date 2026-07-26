@@ -3,417 +3,393 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cổ Nhơn 2026 - Xuân Bính Ngọ</title>
+    <title>Quản lý sổ ghi</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
-    />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>
-  <body>
-    <!-- Loading overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
-      <div class="loading-spinner"></div>
-    </div>
-
-    <!-- Toast notification -->
+  <body class="erp-body">
+    <div class="loading-overlay" id="loadingOverlay"><div class="loading-spinner"></div></div>
     <div class="notification" id="notification"></div>
 
-    <!-- ===== HEADER ===== -->
-    <header class="app-header">
-      <div class="header-inner">
-        <div class="header-deco">
-          <img src="images/lantern.png" alt="" class="lantern" />
-        </div>
-        <div class="header-content">
-          <h1 class="app-title">CỔ NHƠN 2026</h1>
-          <p class="app-subtitle">XUÂN BÍNH NGỌ</p>
-        </div>
-        <div class="header-deco">
-          <img src="images/lantern.png" alt="" class="lantern" />
-        </div>
-      </div>
-    </header>
-
-    <!-- ===== STICKY TOOLBAR ===== -->
-    <nav class="toolbar" id="toolbar">
-      <div class="toolbar-inner">
-        <div class="toolbar-left">
-          <span class="badge-update" id="lastUpdateBadge">
-            <i class="fas fa-clock"></i> Chưa có dữ liệu
-          </span>
-        </div>
-        <div class="toolbar-center">
-          <div class="search-wrapper">
-            <i class="fas fa-search search-icon"></i>
-            <input
-              type="text"
-              id="searchInput"
-              class="search-input"
-              placeholder="Tìm con vật… (Ctrl+F)"
-            />
+    <div class="erp-shell">
+      <aside class="erp-sidebar" id="appSidebar">
+        <div class="erp-brand">
+          <div class="erp-brand-mark"><i class="fas fa-book-open"></i></div>
+          <div class="erp-brand-copy">
+            <strong>SỔ GHI</strong>
+            <span>Quản lý nội bộ</span>
           </div>
-        </div>
-        <div class="toolbar-right">
-          <button onclick="openProfileModal()" class="tb-btn tb-profile" title="Hồ sơ sổ">
-            <i class="fas fa-user-gear"></i><span class="tb-label" id="profileButtonLabel">Tên sổ</span>
-          </button>
-          <button onclick="calculateTotal()" class="tb-btn tb-primary" title="Tính tổng">
-            <i class="fas fa-calculator"></i><span class="tb-label">Tổng</span>
-          </button>
-          <button id="undoBtn" onclick="performUndo()" class="tb-btn tb-warn" title="Hoàn tác (Ctrl+Z)" disabled>
-            <i class="fas fa-undo"></i><span class="tb-label">Hoàn tác</span>
-          </button>
-          <button onclick="exportHistory()" class="tb-btn tb-blue" title="Xuất Excel">
-            <i class="fas fa-file-excel"></i><span class="tb-label">Excel</span>
-          </button>
-          <button onclick="exportAsImage()" class="tb-btn tb-green" title="Xuất ảnh">
-            <i class="fas fa-image"></i><span class="tb-label">Ảnh</span>
-          </button>
-          <button id="exportSessionBtn" onclick="exportSessionSummary()" class="tb-btn tb-teal" title="Xuất phiếu tổng theo buổi">
-            <i class="fas fa-paper-plane"></i><span class="tb-label">Xuất buổi</span>
-          </button>
-          <button onclick="document.getElementById('summaryImportInput').click()" class="tb-btn tb-purple" title="Nhập phiếu tổng từ cấp dưới">
-            <i class="fas fa-file-import"></i><span class="tb-label">Nhập cấp dưới</span>
-          </button>
-          <input type="file" id="summaryImportInput" accept=".json" style="display:none" onchange="importSessionSummary(event)" />
-          <button onclick="exportBackup()" class="tb-btn tb-gray" title="Sao lưu toàn bộ dữ liệu của máy">
-            <i class="fas fa-download"></i><span class="tb-label">Sao lưu</span>
-          </button>
-          <button onclick="document.getElementById('importFileInput').click()" class="tb-btn tb-orange" title="Khôi phục sao lưu toàn bộ">
-            <i class="fas fa-upload"></i><span class="tb-label">Khôi phục</span>
-          </button>
-          <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importBackup(event)" />
-          <button onclick="clearAllData()" class="tb-btn tb-danger" title="Xóa tất cả">
-            <i class="fas fa-trash-alt"></i><span class="tb-label">Xóa</span>
+          <button class="sidebar-close" type="button" onclick="toggleAppSidebar(false)" aria-label="Đóng menu">
+            <i class="fas fa-xmark"></i>
           </button>
         </div>
-      </div>
-    </nav>
 
-    <!-- ===== MAIN 2-COL LAYOUT ===== -->
-    <main class="main-layout">
-      <!-- LEFT SIDEBAR: Form + Lịch sử -->
-      <aside class="sidebar">
-        <section class="card card-form">
-          <div class="card-header"><i class="fas fa-pen-fancy"></i> Ghi Sổ</div>
-          <div class="card-body">
-            <div class="form-row">
-              <label><i class="far fa-calendar-alt"></i> Ngày</label>
-              <input type="date" id="ledgerDate" class="form-control" />
+        <nav class="erp-nav" aria-label="Phân hệ">
+          <button class="erp-nav-link active" type="button" data-route-link="home">
+            <i class="fas fa-house"></i><span>Trang chủ</span>
+          </button>
+
+          <div class="erp-nav-group" data-nav-group="ledger">
+            <button class="erp-nav-title" type="button" data-nav-group-toggle="ledger"><i class="fas fa-book"></i><span>Quản lý sổ ghi</span><i class="fas fa-chevron-down nav-group-chevron"></i></button>
+            <div class="erp-nav-children">
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="ledger-entry">Sổ ghi</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="ledger-history">Lịch sử ghi sổ</button>
             </div>
-            <div class="form-row">
-              <label><i class="far fa-clock"></i> Buổi</label>
-              <div class="session-selector">
-                <label class="session-chip">
-                  <input type="radio" name="session" value="Sáng" checked />
-                  <span><i class="fas fa-sun"></i> Sáng</span>
-                </label>
-                <label class="session-chip">
-                  <input type="radio" name="session" value="Chiều" />
-                  <span><i class="fas fa-moon"></i> Chiều</span>
-                </label>
-              </div>
-            </div>
-            <div class="form-row">
-              <label><i class="far fa-user"></i> Của</label>
-              <input
-                type="text"
-                id="ledgerPerson"
-                class="form-control"
-                placeholder="Tên người mua"
-                list="personSuggestions"
-                autocomplete="off"
-              />
-              <datalist id="personSuggestions"></datalist>
-            </div>
-            <div class="form-row">
-              <label><i class="fas fa-store"></i> Người bán</label>
-              <input
-                type="text"
-                id="ledgerSeller"
-                class="form-control"
-                placeholder="Tên người bán"
-                list="sellerSuggestions"
-                autocomplete="off"
-              />
-              <datalist id="sellerSuggestions"></datalist>
-            </div>
-            <div class="form-row">
-              <label><i class="far fa-edit"></i> Nội dung</label>
-              <textarea
-                id="ledgerContent"
-                class="form-control"
-                rows="3"
-                placeholder="VD: lân 50 chó 50, ốc 100 (số ngắn tính theo nghìn)"
-              ></textarea>
-            </div>
-            <div class="form-row">
-              <label><i class="fas fa-wallet"></i> Thanh toán</label>
-              <div class="payment-selector">
-                <label class="payment-chip payment-cash">
-                  <input type="radio" name="paymentType" value="cash" checked />
-                  <span><i class="fas fa-money-bill-wave"></i> Tiền mặt</span>
-                </label>
-                <label class="payment-chip payment-transfer">
-                  <input type="radio" name="paymentType" value="bank_transfer" />
-                  <span><i class="fas fa-building-columns"></i> CK</span>
-                </label>
-                <label class="payment-chip payment-debt">
-                  <input type="radio" name="paymentType" value="debt" />
-                  <span><i class="fas fa-clock"></i> Nợ</span>
-                </label>
-              </div>
-            </div>
-            <div class="parse-preview" id="parsePreview">
-              <div class="parse-preview-empty">Nhập nội dung để xem kết quả nhận dạng</div>
-            </div>
-            <div class="form-total-row">
-              <span class="form-total-label">Tổng cộng:</span>
-              <span id="ledgerTotal" class="form-total-value">0 đ</span>
-            </div>
-            <button onclick="processLedgerEntry()" class="btn-submit">
-              <i class="fas fa-check-circle"></i> Ghi vào sổ
-            </button>
           </div>
-        </section>
 
+          <div class="erp-nav-group" data-nav-group="payout">
+            <button class="erp-nav-title" type="button" data-nav-group-toggle="payout"><i class="fas fa-gift"></i><span>Quản lý trả thưởng</span><i class="fas fa-chevron-down nav-group-chevron"></i></button>
+            <div class="erp-nav-children">
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="payout-lookup">Tra cứu con xổ</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="payout-pending">Phiếu cần trả</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="payout-history">Lịch sử trả thưởng</button>
+            </div>
+          </div>
+
+          <div class="erp-nav-group" data-nav-group="finance">
+            <button class="erp-nav-title" type="button" data-nav-group-toggle="finance"><i class="fas fa-chart-column"></i><span>Doanh thu & công nợ</span><i class="fas fa-chevron-down nav-group-chevron"></i></button>
+            <div class="erp-nav-children">
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="finance-overview">Tổng quan</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="finance-debt">Công nợ khách hàng</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="finance-source">Tổng theo nguồn</button>
+            </div>
+          </div>
+
+          <div class="erp-nav-group" data-nav-group="data">
+            <button class="erp-nav-title" type="button" data-nav-group-toggle="data"><i class="fas fa-layer-group"></i><span>Tổng hợp dữ liệu</span><i class="fas fa-chevron-down nav-group-chevron"></i></button>
+            <div class="erp-nav-children">
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="data-import">Nhập từ cấp dưới</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="data-imported">Phiếu cấp dưới</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="data-export">Xuất lên cấp trên</button>
+            </div>
+          </div>
+
+          <div class="erp-nav-group" data-nav-group="tools">
+            <button class="erp-nav-title" type="button" data-nav-group-toggle="tools"><i class="fas fa-toolbox"></i><span>Báo cáo & tiện ích</span><i class="fas fa-chevron-down nav-group-chevron"></i></button>
+            <div class="erp-nav-children">
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="tools-report">Xuất báo cáo</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="tools-backup">Sao lưu & khôi phục</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="tools-profile">Hồ sơ sổ</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="tools-data">Quản lý dữ liệu</button>
+            </div>
+          </div>
+        </nav>
+
+        <div class="erp-sidebar-footer">
+          <i class="fas fa-laptop"></i>
+          <span>Dữ liệu đang lưu trên trình duyệt này</span>
+        </div>
       </aside>
 
-      <!-- RIGHT: Tabs -->
-      <section class="content">
-        <div class="view-filter-bar">
-          <div class="view-date-control">
-            <label for="viewDate"><i class="far fa-calendar-alt"></i> Ngày đang xem</label>
-            <input type="date" id="viewDate" class="form-control" />
-            <button type="button" class="btn-today" onclick="goToToday()">Hôm nay</button>
+      <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleAppSidebar(false)"></div>
+
+      <div class="erp-workspace">
+        <header class="erp-topbar">
+          <div class="erp-topbar-main">
+            <button class="mobile-menu-btn" type="button" onclick="toggleAppSidebar()" aria-label="Ẩn hoặc hiện menu" title="Ẩn hoặc hiện menu">
+              <i class="fas fa-bars"></i>
+            </button>
+            <div class="page-heading">
+              <span class="page-breadcrumb" id="pageBreadcrumb">Hệ thống / Trang chủ</span>
+              <h1 id="pageTitle">Trang chủ</h1>
+            </div>
+          </div>
+          <div class="erp-topbar-actions">
+            <span class="badge-update" id="lastUpdateBadge"><i class="fas fa-clock"></i> Chưa có dữ liệu</span>
+            <button onclick="openProfileModal()" class="profile-top-btn" type="button">
+              <span class="profile-avatar"><i class="fas fa-user"></i></span>
+              <span id="profileButtonLabel">Tên sổ</span>
+              <i class="fas fa-chevron-down"></i>
+            </button>
+          </div>
+        </header>
+
+        <div class="erp-contextbar">
+          <div class="date-range-picker" id="dateRangePicker">
+            <button class="date-range-toggle" id="dateRangeToggle" type="button" aria-expanded="false">
+              <span id="dateRangeLabel">Hôm nay</span>
+              <i class="far fa-calendar-alt"></i>
+            </button>
+            <div class="date-range-popover" id="dateRangePopover">
+              <div class="date-range-fields">
+                <label class="date-field"><span>Từ ngày</span><input type="date" id="viewDateFrom" class="form-control" /></label>
+                <span class="date-range-arrow"><i class="fas fa-arrow-right"></i></span>
+                <label class="date-field"><span>Đến ngày</span><input type="date" id="viewDateTo" class="form-control" /></label>
+              </div>
+              <div class="date-range-footer">
+                <div class="quick-date-selector" id="quickDateSelector">
+                  <button type="button" class="quick-date-btn active" data-range-days="1">Hôm nay</button>
+                  <button type="button" class="quick-date-btn" data-range-days="7">7 ngày gần nhất</button>
+                  <button type="button" class="quick-date-btn" data-range-days="30">30 ngày gần nhất</button>
+                </div>
+                <button type="button" class="date-range-close" onclick="closeDateRangePicker()">Đóng</button>
+              </div>
+            </div>
           </div>
           <div class="view-session-selector" id="viewSessionSelector">
-            <button type="button" class="view-session-btn active" data-session="Sáng">
-              <i class="fas fa-sun"></i> Sáng
-            </button>
-            <button type="button" class="view-session-btn" data-session="Chiều">
-              <i class="fas fa-moon"></i> Chiều
-            </button>
-            <button type="button" class="view-session-btn" data-session="">
-              <i class="fas fa-calendar-day"></i> Cả ngày
-            </button>
+            <button type="button" class="view-session-btn active" data-session="Sáng"><i class="fas fa-sun"></i> Sáng</button>
+            <button type="button" class="view-session-btn" data-session="Chiều"><i class="fas fa-moon"></i> Chiều</button>
+            <button type="button" class="view-session-btn" data-session=""><i class="fas fa-calendar-day"></i> Cả ngày</button>
           </div>
           <div class="storage-usage" id="storageUsage">Dữ liệu: 0 KB</div>
         </div>
-        <div class="tab-bar">
-          <button class="tab-btn active" data-tab="gridTab">
-            <i class="fas fa-th"></i> Bảng Con Vật
-          </button>
-          <button class="tab-btn" data-tab="historyTab">
-            <i class="fas fa-history"></i> Lịch Sử Ghi Sổ
-          </button>
-          <button class="tab-btn" data-tab="financeTab">
-            <i class="fas fa-chart-column"></i> Doanh Thu & Công Nợ
-          </button>
-        </div>
 
-        <div class="tab-panel active" id="gridTab">
-          <div class="grid" id="animalGrid">
-            <!-- JS renders -->
-          </div>
-          <div class="grand-total-bar">
-            <div class="shortcut-hint">
-              <span><kbd>Ctrl</kbd>+<kbd>F</kbd> Tìm</span>
-              <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> Hoàn tác</span>
-              <span><kbd>Esc</kbd> Đóng</span>
+        <main class="erp-main">
+          <section class="app-page active" data-route-page="home">
+            <div class="welcome-banner">
+              <div>
+                <span class="welcome-eyebrow">TỔNG QUAN VẬN HÀNH</span>
+                <h2>Chào mừng bạn trở lại</h2>
+                <p>Chọn một chức năng bên dưới để bắt đầu công việc trong ngày.</p>
+              </div>
+              <button type="button" class="welcome-action" data-route-link="ledger-entry">
+                <i class="fas fa-plus"></i> Ghi sổ mới
+              </button>
             </div>
-            <div id="totalAmount" class="grand-total-value">Tổng: 0 đ</div>
-          </div>
-        </div>
 
-        <div class="tab-panel" id="historyTab">
-          <!-- Tra cứu con xổ -->
-          <div class="win-lookup card">
-            <div class="card-header"><i class="fas fa-trophy"></i> Tra Cứu Con Xổ</div>
-            <div class="card-body win-lookup-body">
-              <div class="win-lookup-row">
-                <label><i class="far fa-clock"></i> Buổi</label>
-                <select id="winSession" class="form-control">
-                  <option value="">-- Cả ngày --</option>
-                  <option value="Sáng">Sáng</option>
-                  <option value="Chiều">Chiều</option>
-                </select>
-              </div>
-              <div class="win-lookup-row">
-                <label><i class="fas fa-paw"></i> Con xổ</label>
-                <select id="winAnimal" class="form-control">
-                  <option value="">-- Chọn con --</option>
-                </select>
-              </div>
-              <div class="win-lookup-row">
-                <label><i class="fas fa-store"></i> Người bán</label>
-                <select id="winSeller" class="form-control">
-                  <option value="">-- Tất cả --</option>
-                </select>
-              </div>
-              <div class="win-lookup-row win-lookup-action">
-                <button class="btn-submit" onclick="filterWinningEntries()">
-                  <i class="fas fa-filter"></i> Lọc phiếu
-                </button>
-              </div>
+            <div class="section-heading">
+              <div><h2>Phân hệ nghiệp vụ</h2><p>Các chức năng được nhóm theo quy trình làm việc.</p></div>
             </div>
-          </div>
-          <!-- Kết quả tra cứu con xổ -->
-          <div class="card" id="winResultCard" style="display:none;">
-            <div class="card-header win-result-header"><i class="fas fa-list-check"></i> <span id="winResultTitle">Phiếu chứa con xổ</span></div>
-            <div class="card-body" id="winResultBody"></div>
-          </div>
-          <!-- Seller filter + summary -->
-          <div class="seller-filter-bar">
-            <div class="filter-row">
-              <label><i class="fas fa-filter"></i> Lọc người bán:</label>
-              <select id="sellerFilter" class="form-control filter-select" onchange="filterBySeller()">
-                <option value="">-- Tất cả --</option>
-              </select>
+            <div class="module-grid">
+              <article class="module-card module-ledger">
+                <div class="module-card-head"><span><i class="fas fa-book"></i></span><div><h3>Quản lý sổ ghi</h3><p>Ghi nhanh, theo dõi và chỉnh sửa các phiếu trong ngày.</p></div></div>
+                <div class="module-links">
+                  <button type="button" data-route-link="ledger-entry"><span>Sổ ghi</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="ledger-history"><span>Lịch sử ghi sổ</span><i class="fas fa-chevron-right"></i></button>
+                </div>
+              </article>
+              <article class="module-card module-payout">
+                <div class="module-card-head"><span><i class="fas fa-gift"></i></span><div><h3>Quản lý trả thưởng</h3><p>Tra cứu phiếu có con xổ và theo dõi trạng thái trả.</p></div></div>
+                <div class="module-links">
+                  <button type="button" data-route-link="payout-lookup"><span>Tra cứu con xổ</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="payout-pending"><span>Phiếu cần trả</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="payout-history"><span>Lịch sử trả thưởng</span><i class="fas fa-chevron-right"></i></button>
+                </div>
+              </article>
+              <article class="module-card module-finance">
+                <div class="module-card-head"><span><i class="fas fa-chart-column"></i></span><div><h3>Doanh thu & công nợ</h3><p>Phân loại tiền mặt, chuyển khoản và khoản khách nợ.</p></div></div>
+                <div class="module-links">
+                  <button type="button" data-route-link="finance-overview"><span>Tổng quan doanh thu</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="finance-debt"><span>Công nợ khách hàng</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="finance-source"><span>Tổng theo nguồn</span><i class="fas fa-chevron-right"></i></button>
+                </div>
+              </article>
+              <article class="module-card module-data">
+                <div class="module-card-head"><span><i class="fas fa-layer-group"></i></span><div><h3>Tổng hợp dữ liệu</h3><p>Trao đổi phiếu tổng theo từng buổi giữa các cấp.</p></div></div>
+                <div class="module-links">
+                  <button type="button" data-route-link="data-import"><span>Nhập từ cấp dưới</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="data-imported"><span>Phiếu cấp dưới</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="data-export"><span>Xuất lên cấp trên</span><i class="fas fa-chevron-right"></i></button>
+                </div>
+              </article>
+              <article class="module-card module-tools">
+                <div class="module-card-head"><span><i class="fas fa-toolbox"></i></span><div><h3>Báo cáo & tiện ích</h3><p>Xuất báo cáo, sao lưu và quản lý dữ liệu cục bộ.</p></div></div>
+                <div class="module-links">
+                  <button type="button" data-route-link="tools-report"><span>Xuất báo cáo</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="tools-backup"><span>Sao lưu & khôi phục</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="tools-profile"><span>Hồ sơ sổ</span><i class="fas fa-chevron-right"></i></button>
+                </div>
+              </article>
             </div>
-          </div>
-          <div class="seller-summary card" id="sellerSummaryCard" style="display:none;">
-            <div class="card-header"><i class="fas fa-chart-pie"></i> Tổng Theo Người Bán</div>
-            <div class="card-body" id="sellerSummaryBody"></div>
-          </div>
-          <div class="card card-history">
-            <div class="card-header"><i class="fas fa-history"></i> Lịch Sử Ghi Sổ</div>
-            <div class="card-body" id="ledgerEntries"></div>
-          </div>
-        </div>
+          </section>
 
-        <div class="tab-panel" id="financeTab">
-          <div class="finance-grid">
-            <div class="finance-stat finance-total">
-              <span class="finance-label">Tổng ghi sổ</span>
-              <strong id="financeGrandTotal">0 đ</strong>
+          <section class="app-page" data-route-page="ledger-entry">
+            <div class="ledger-workspace-layout">
+              <aside class="ledger-entry-column">
+                <section class="card card-form">
+                  <div class="card-header"><i class="fas fa-pen-fancy"></i> Ghi sổ</div>
+                  <div class="card-body">
+                    <div class="form-row"><label><i class="far fa-calendar-alt"></i> Ngày</label><input type="date" id="ledgerDate" class="form-control" /></div>
+                    <div class="form-row">
+                      <label><i class="far fa-clock"></i> Buổi</label>
+                      <div class="session-selector">
+                        <label class="session-chip"><input type="radio" name="session" value="Sáng" checked /><span><i class="fas fa-sun"></i> Sáng</span></label>
+                        <label class="session-chip"><input type="radio" name="session" value="Chiều" /><span><i class="fas fa-moon"></i> Chiều</span></label>
+                      </div>
+                    </div>
+                    <div class="form-row"><label><i class="far fa-user"></i> Khách</label><input type="text" id="ledgerPerson" class="form-control" placeholder="Tên người mua" list="personSuggestions" autocomplete="off" /><datalist id="personSuggestions"></datalist></div>
+                    <div class="form-row"><label><i class="fas fa-store"></i> Người bán</label><input type="text" id="ledgerSeller" class="form-control" placeholder="Tên người bán" list="sellerSuggestions" autocomplete="off" /><datalist id="sellerSuggestions"></datalist></div>
+                    <div class="form-row">
+                      <label><i class="far fa-edit"></i> Nội dung</label>
+                      <textarea id="ledgerContent" class="form-control" rows="3" placeholder="VD: lân 50 chó 50, ong 50"></textarea>
+                      <small class="form-hint">Có thể ngăn cách bằng dấu cách, dấu phẩy hoặc xuống dòng. Số 50 được hiểu là 50.000 đ.</small>
+                    </div>
+                    <div class="form-row">
+                      <label><i class="fas fa-wallet"></i> Thanh toán</label>
+                      <div class="payment-selector">
+                        <label class="payment-chip payment-cash"><input type="radio" name="paymentType" value="cash" checked /><span><i class="fas fa-money-bill-wave"></i> Tiền mặt</span></label>
+                        <label class="payment-chip payment-transfer"><input type="radio" name="paymentType" value="bank_transfer" /><span><i class="fas fa-building-columns"></i> CK</span></label>
+                        <label class="payment-chip payment-debt"><input type="radio" name="paymentType" value="debt" /><span><i class="fas fa-clock"></i> Nợ</span></label>
+                      </div>
+                    </div>
+                    <div class="parse-preview" id="parsePreview"><div class="parse-preview-empty">Nhập nội dung để xem kết quả nhận dạng</div></div>
+                    <div class="form-total-row"><span class="form-total-label">Tổng cộng:</span><span id="ledgerTotal" class="form-total-value">0 đ</span></div>
+                    <button onclick="processLedgerEntry()" class="btn-submit"><i class="fas fa-check-circle"></i> Ghi vào sổ</button>
+                  </div>
+                </section>
+              </aside>
+              <section class="ledger-grid-column">
+                <div class="page-actionbar">
+                  <div class="search-wrapper"><i class="fas fa-search search-icon"></i><input type="text" id="searchInput" class="search-input" placeholder="Tìm con vật… (Ctrl+F)" /></div>
+                  <button id="undoBtn" onclick="performUndo()" class="action-btn action-warn" type="button" disabled><i class="fas fa-undo"></i> Hoàn tác</button>
+                </div>
+                <div class="grid" id="animalGrid"></div>
+                <div class="grand-total-bar">
+                  <div class="shortcut-hint"><span><kbd>Ctrl</kbd>+<kbd>F</kbd> Tìm</span><span><kbd>Ctrl</kbd>+<kbd>Z</kbd> Hoàn tác</span></div>
+                  <div id="totalAmount" class="grand-total-value">Tổng: 0 đ</div>
+                </div>
+              </section>
             </div>
-            <div class="finance-stat finance-collected">
-              <span class="finance-label">Tiền đã thu trực tiếp</span>
-              <strong id="financeCollected">0 đ</strong>
-            </div>
-            <div class="finance-stat finance-cash">
-              <span class="finance-label">Tiền mặt</span>
-              <strong id="financeCash">0 đ</strong>
-            </div>
-            <div class="finance-stat finance-transfer">
-              <span class="finance-label">Chuyển khoản</span>
-              <strong id="financeTransfer">0 đ</strong>
-            </div>
-            <div class="finance-stat finance-debt">
-              <span class="finance-label">Khách nợ</span>
-              <strong id="financeDebt">0 đ</strong>
-            </div>
-            <div class="finance-stat finance-imported">
-              <span class="finance-label">Từ cấp dưới</span>
-              <strong id="financeImported">0 đ</strong>
-            </div>
-          </div>
-          <div class="card debt-card">
-            <div class="card-header"><i class="fas fa-file-invoice-dollar"></i> Danh Sách Công Nợ</div>
-            <div class="card-body" id="debtList"></div>
-          </div>
-          <div class="card source-card">
-            <div class="card-header"><i class="fas fa-sitemap"></i> Tổng Theo Nguồn Dữ Liệu</div>
-            <div class="card-body" id="sourceSummary"></div>
-          </div>
-        </div>
-      </section>
-    </main>
+          </section>
 
-    <!-- Edit Modal -->
-    <div class="modal-overlay" id="editModal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3><i class="fas fa-edit"></i> Sửa Ghi Sổ</h3>
-          <button class="modal-close" onclick="closeEditModal()">&times;</button>
-        </div>
-        <div class="modal-body">
-          <input type="hidden" id="editEntryId" />
-          <div class="form-row">
-            <label><i class="far fa-calendar-alt"></i> Ngày</label>
-            <input type="date" id="editDate" class="form-control" />
-          </div>
-          <div class="form-row">
-            <label><i class="far fa-clock"></i> Buổi</label>
-            <div class="session-selector">
-              <label class="session-chip">
-                <input type="radio" name="editSession" value="Sáng" checked />
-                <span><i class="fas fa-sun"></i> Sáng</span>
-              </label>
-              <label class="session-chip">
-                <input type="radio" name="editSession" value="Chiều" />
-                <span><i class="fas fa-moon"></i> Chiều</span>
-              </label>
+          <section class="app-page" data-route-page="ledger-history">
+            <div class="seller-filter-bar">
+              <div class="filter-row"><label><i class="fas fa-filter"></i> Người bán</label><select id="sellerFilter" class="form-control filter-select" onchange="filterBySeller()"><option value="">-- Tất cả --</option></select></div>
             </div>
-          </div>
-          <div class="form-row">
-            <label><i class="far fa-user"></i> Của</label>
-            <input type="text" id="editPerson" class="form-control" placeholder="Tên người mua" />
-          </div>
-          <div class="form-row">
-            <label><i class="fas fa-store"></i> Người bán</label>
-            <input type="text" id="editSeller" class="form-control" placeholder="Tên người bán" />
-          </div>
-          <div class="form-row">
-            <label><i class="far fa-edit"></i> Nội dung</label>
-            <textarea id="editContent" class="form-control" rows="3" placeholder="VD: cá trắng 50k, ốc 100k"></textarea>
-          </div>
-          <div class="form-row">
-            <label><i class="fas fa-wallet"></i> Thanh toán</label>
-            <select id="editPaymentType" class="form-control">
-              <option value="cash">Tiền mặt</option>
-              <option value="bank_transfer">Chuyển khoản</option>
-              <option value="debt">Nợ</option>
-              <option value="unknown">Chưa xác định</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-modal btn-modal-cancel" onclick="closeEditModal()">
-            <i class="fas fa-times"></i> Hủy
-          </button>
-          <button class="btn-modal btn-modal-save" onclick="saveEditedEntry()">
-            <i class="fas fa-save"></i> Lưu thay đổi
-          </button>
-        </div>
+            <div class="seller-summary card" id="sellerSummaryCard" style="display:none;"><div class="card-header"><i class="fas fa-chart-pie"></i> Tổng theo người bán</div><div class="card-body" id="sellerSummaryBody"></div></div>
+            <div class="card card-history"><div class="card-header"><i class="fas fa-history"></i> Danh sách phiếu</div><div class="card-body" id="ledgerEntries"></div></div>
+          </section>
+
+          <section class="app-page" data-route-page="payout-lookup">
+            <div class="page-intro"><div><h2>Tra cứu con xổ</h2><p>Lọc các phiếu có con xổ và đánh dấu đã trả thưởng.</p></div></div>
+            <div class="win-lookup card">
+              <div class="card-header"><i class="fas fa-trophy"></i> Điều kiện tra cứu</div>
+              <div class="card-body win-lookup-body">
+                <div class="win-lookup-row"><label><i class="far fa-clock"></i> Buổi</label><select id="winSession" class="form-control"><option value="">-- Cả ngày --</option><option value="Sáng">Sáng</option><option value="Chiều">Chiều</option></select></div>
+                <div class="win-lookup-row"><label><i class="fas fa-paw"></i> Con xổ</label><select id="winAnimal" class="form-control"><option value="">-- Chọn con --</option></select></div>
+                <div class="win-lookup-row"><label><i class="fas fa-store"></i> Người bán</label><select id="winSeller" class="form-control"><option value="">-- Tất cả --</option></select></div>
+                <div class="win-lookup-row win-lookup-action"><button class="btn-submit" onclick="filterWinningEntries()"><i class="fas fa-filter"></i> Lọc phiếu</button></div>
+              </div>
+            </div>
+            <div class="card" id="winResultCard" style="display:none;"><div class="card-header win-result-header"><i class="fas fa-list-check"></i> <span id="winResultTitle">Phiếu chứa con xổ</span></div><div class="card-body" id="winResultBody"></div></div>
+          </section>
+
+          <section class="app-page" data-route-page="payout-pending">
+            <div class="feature-placeholder"><span class="feature-icon"><i class="fas fa-hourglass-half"></i></span><h2>Phiếu cần trả</h2><p>Phần này sẽ tổng hợp các phiếu chưa đánh dấu trả sau khi bạn tra cứu con xổ.</p><button type="button" class="primary-action" data-route-link="payout-lookup">Đi đến tra cứu con xổ</button><span class="feature-status">Khung chức năng — chờ chốt thêm nghiệp vụ</span></div>
+          </section>
+
+          <section class="app-page" data-route-page="payout-history">
+            <div class="feature-placeholder"><span class="feature-icon"><i class="fas fa-clock-rotate-left"></i></span><h2>Lịch sử trả thưởng</h2><p>Dự kiến lưu theo ngày, buổi, con xổ, người nhận và số tiền đã trả.</p><button type="button" class="primary-action" data-route-link="payout-lookup">Đi đến tra cứu con xổ</button><span class="feature-status">Khung chức năng — chờ chốt thêm nghiệp vụ</span></div>
+          </section>
+
+          <section class="app-page" data-route-page="finance-overview">
+            <div class="page-intro"><div><h2>Tổng quan doanh thu</h2><p>Số liệu được tính theo ngày và buổi đang chọn.</p></div></div>
+            <div class="finance-grid">
+              <div class="finance-stat finance-total"><span class="finance-label">Tổng ghi sổ</span><strong id="financeGrandTotal">0 đ</strong></div>
+              <div class="finance-stat finance-collected"><span class="finance-label">Đã thu trực tiếp</span><strong id="financeCollected">0 đ</strong></div>
+              <div class="finance-stat finance-cash"><span class="finance-label">Tiền mặt</span><strong id="financeCash">0 đ</strong></div>
+              <div class="finance-stat finance-transfer"><span class="finance-label">Chuyển khoản</span><strong id="financeTransfer">0 đ</strong></div>
+              <div class="finance-stat finance-debt"><span class="finance-label">Khách nợ</span><strong id="financeDebt">0 đ</strong></div>
+              <div class="finance-stat finance-imported"><span class="finance-label">Từ cấp dưới</span><strong id="financeImported">0 đ</strong></div>
+            </div>
+            <div class="quick-route-grid">
+              <button type="button" data-route-link="finance-debt"><i class="fas fa-file-invoice-dollar"></i><span><strong>Xem công nợ</strong><small>Danh sách khách còn nợ</small></span><i class="fas fa-arrow-right"></i></button>
+              <button type="button" data-route-link="finance-source"><i class="fas fa-sitemap"></i><span><strong>Xem theo nguồn</strong><small>Dữ liệu trực tiếp và cấp dưới</small></span><i class="fas fa-arrow-right"></i></button>
+            </div>
+          </section>
+
+          <section class="app-page" data-route-page="finance-debt">
+            <div class="page-intro"><div><h2>Công nợ khách hàng</h2><p>Chỉ gồm các phiếu được đánh dấu “Nợ” trên máy này.</p></div></div>
+            <div class="card debt-card"><div class="card-header"><i class="fas fa-file-invoice-dollar"></i> Danh sách công nợ</div><div class="card-body" id="debtList"></div></div>
+          </section>
+
+          <section class="app-page" data-route-page="finance-source">
+            <div class="page-intro"><div><h2>Tổng theo nguồn dữ liệu</h2><p>Phân biệt phần ghi trực tiếp và các phiếu tổng đã nhập từ cấp dưới.</p></div></div>
+            <div class="card source-card"><div class="card-header"><i class="fas fa-sitemap"></i> Tổng theo nguồn</div><div class="card-body" id="sourceSummary"></div></div>
+          </section>
+
+          <section class="app-page" data-route-page="data-import">
+            <div class="page-intro"><div><h2>Nhập từ cấp dưới</h2><p>Mỗi tệp là một phiếu tổng của một cấp dưới trong một buổi.</p></div></div>
+            <div class="workflow-card">
+              <div class="workflow-steps"><span><b>1</b> Nhận tệp JSON</span><i class="fas fa-arrow-right"></i><span><b>2</b> Kiểm tra nguồn, ngày, buổi</span><i class="fas fa-arrow-right"></i><span><b>3</b> Cộng vào dữ liệu tổng</span></div>
+              <div class="privacy-note"><i class="fas fa-shield-halved"></i><div><strong>Không nhập chi tiết khách và hình thức thanh toán</strong><p>Phiếu cấp dưới chỉ chứa tổng tiền theo từng con vật, đúng theo luồng nghiệp vụ đã thống nhất.</p></div></div>
+              <button type="button" class="large-action action-purple" onclick="document.getElementById('summaryImportInput').click()"><i class="fas fa-file-import"></i><span><strong>Chọn phiếu tổng để nhập</strong><small>Định dạng .json do hệ thống này xuất</small></span></button>
+            </div>
+          </section>
+
+          <section class="app-page" data-route-page="data-imported">
+            <div class="page-intro"><div><h2>Phiếu cấp dưới</h2><p>Mỗi dòng là một phiếu tổng theo nguồn, ngày và buổi — không hiển thị chi tiết khách.</p></div></div>
+            <div class="card"><div class="card-header"><i class="fas fa-inbox"></i> Các phiếu đã nhập</div><div class="card-body" id="importedEntriesList"></div></div>
+          </section>
+
+          <section class="app-page" data-route-page="data-export">
+            <div class="page-intro"><div><h2>Xuất lên cấp trên</h2><p>Xuất tổng dữ liệu của sổ này theo ngày và buổi đang chọn.</p></div></div>
+            <div class="workflow-card">
+              <div class="export-preview" id="exportSummaryPreview"></div>
+              <div class="privacy-note"><i class="fas fa-eye-slash"></i><div><strong>Tệp xuất không có khách, tiền mặt, chuyển khoản hay công nợ</strong><p>Cấp trên chỉ nhận tổng số tiền theo từng con vật của cả buổi.</p></div></div>
+              <button id="exportSessionBtn" type="button" class="large-action action-teal" onclick="exportSessionSummary()"><i class="fas fa-paper-plane"></i><span><strong>Xuất phiếu của buổi đang chọn</strong><small>Chọn Sáng hoặc Chiều trước khi xuất</small></span></button>
+            </div>
+          </section>
+
+          <section class="app-page" data-route-page="tools-report">
+            <div class="page-intro"><div><h2>Xuất báo cáo</h2><p>Tạo báo cáo từ dữ liệu trên trình duyệt hiện tại.</p></div></div>
+            <div class="utility-grid">
+              <button class="utility-card" type="button" onclick="exportHistory()"><span class="utility-icon excel"><i class="fas fa-file-excel"></i></span><strong>Xuất Excel</strong><small>Lịch sử và tổng hợp dữ liệu</small></button>
+              <button class="utility-card" type="button" onclick="exportAsImage()"><span class="utility-icon image"><i class="fas fa-image"></i></span><strong>Xuất ảnh</strong><small>Chụp bảng con vật đang xem</small></button>
+            </div>
+          </section>
+
+          <section class="app-page" data-route-page="tools-backup">
+            <div class="page-intro"><div><h2>Sao lưu & khôi phục</h2><p>Dùng để chuyển hoặc bảo vệ toàn bộ dữ liệu của trình duyệt này.</p></div></div>
+            <div class="utility-grid">
+              <button class="utility-card" type="button" onclick="exportBackup()"><span class="utility-icon backup"><i class="fas fa-download"></i></span><strong>Tải bản sao lưu</strong><small>Bao gồm toàn bộ dữ liệu và hồ sơ sổ</small></button>
+              <button class="utility-card" type="button" onclick="document.getElementById('importFileInput').click()"><span class="utility-icon restore"><i class="fas fa-upload"></i></span><strong>Khôi phục dữ liệu</strong><small>Chọn tệp sao lưu .json</small></button>
+            </div>
+            <div class="warning-box"><i class="fas fa-triangle-exclamation"></i><div><strong>Hãy sao lưu trước khi đổi máy hoặc xóa dữ liệu trình duyệt.</strong><p>Dữ liệu web tĩnh không tự đồng bộ sang trình duyệt khác.</p></div></div>
+          </section>
+
+          <section class="app-page" data-route-page="tools-profile">
+            <div class="page-intro"><div><h2>Hồ sơ sổ</h2><p>Tên sổ giúp cấp trên nhận biết nguồn của phiếu tổng.</p></div></div>
+            <div class="profile-page-card">
+              <span class="profile-page-avatar"><i class="fas fa-address-card"></i></span>
+              <div><h3 id="profilePageName">Tên sổ chưa thiết lập</h3><p>Mã sổ được tạo riêng trên trình duyệt này.</p></div>
+              <button type="button" class="primary-action" onclick="openProfileModal()">Thiết lập hồ sơ</button>
+            </div>
+          </section>
+
+          <section class="app-page" data-route-page="tools-data">
+            <div class="page-intro"><div><h2>Quản lý dữ liệu</h2><p>Kiểm tra dung lượng hoặc xóa toàn bộ dữ liệu cục bộ.</p></div></div>
+            <div class="danger-zone">
+              <div><span class="danger-icon"><i class="fas fa-database"></i></span><h3>Dữ liệu trên trình duyệt</h3><p>Nên tạo bản sao lưu trước khi thực hiện thao tác xóa.</p></div>
+              <button type="button" class="danger-action" onclick="clearAllData()"><i class="fas fa-trash-alt"></i> Xóa toàn bộ dữ liệu</button>
+            </div>
+          </section>
+        </main>
       </div>
     </div>
 
-    <!-- Local profile modal -->
+    <input type="file" id="summaryImportInput" accept=".json" hidden onchange="importSessionSummary(event)" />
+    <input type="file" id="importFileInput" accept=".json" hidden onchange="importBackup(event)" />
+
+    <div class="modal-overlay" id="editModal">
+      <div class="modal-content">
+        <div class="modal-header"><h3><i class="fas fa-edit"></i> Sửa ghi sổ</h3><button class="modal-close" onclick="closeEditModal()">&times;</button></div>
+        <div class="modal-body">
+          <input type="hidden" id="editEntryId" />
+          <div class="form-row"><label><i class="far fa-calendar-alt"></i> Ngày</label><input type="date" id="editDate" class="form-control" /></div>
+          <div class="form-row"><label><i class="far fa-clock"></i> Buổi</label><div class="session-selector"><label class="session-chip"><input type="radio" name="editSession" value="Sáng" checked /><span><i class="fas fa-sun"></i> Sáng</span></label><label class="session-chip"><input type="radio" name="editSession" value="Chiều" /><span><i class="fas fa-moon"></i> Chiều</span></label></div></div>
+          <div class="form-row"><label><i class="far fa-user"></i> Khách</label><input type="text" id="editPerson" class="form-control" placeholder="Tên người mua" /></div>
+          <div class="form-row"><label><i class="fas fa-store"></i> Người bán</label><input type="text" id="editSeller" class="form-control" placeholder="Tên người bán" /></div>
+          <div class="form-row"><label><i class="far fa-edit"></i> Nội dung</label><textarea id="editContent" class="form-control" rows="3" placeholder="VD: chó 50 lân 50"></textarea></div>
+          <div class="form-row"><label><i class="fas fa-wallet"></i> Thanh toán</label><select id="editPaymentType" class="form-control"><option value="cash">Tiền mặt</option><option value="bank_transfer">Chuyển khoản</option><option value="debt">Nợ</option><option value="unknown">Chưa xác định</option></select></div>
+        </div>
+        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeEditModal()"><i class="fas fa-times"></i> Hủy</button><button class="btn-modal btn-modal-save" onclick="saveEditedEntry()"><i class="fas fa-save"></i> Lưu thay đổi</button></div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="profileModal">
       <div class="modal-content profile-modal-content">
-        <div class="modal-header">
-          <h3><i class="fas fa-address-card"></i> Hồ Sơ Sổ</h3>
-          <button class="modal-close" onclick="closeProfileModal()">&times;</button>
-        </div>
+        <div class="modal-header"><h3><i class="fas fa-address-card"></i> Hồ sơ sổ</h3><button class="modal-close" onclick="closeProfileModal()">&times;</button></div>
         <div class="modal-body">
-          <p class="profile-help">
-            Tên này được ghi vào phiếu tổng khi xuất cho cấp trên. Đây không phải tài khoản đăng nhập.
-          </p>
-          <div class="form-row">
-            <label for="profileName"><i class="fas fa-signature"></i> Tên sổ</label>
-            <input type="text" id="profileName" class="form-control" maxlength="80" placeholder="VD: Sổ của Thiện" />
-          </div>
-          <div class="profile-id-row">
-            <span>Mã sổ:</span>
-            <code id="profileIdDisplay"></code>
-          </div>
+          <p class="profile-help">Tên này được ghi vào phiếu tổng khi xuất cho cấp trên. Đây không phải tài khoản đăng nhập.</p>
+          <div class="form-row"><label for="profileName"><i class="fas fa-signature"></i> Tên sổ</label><input type="text" id="profileName" class="form-control" maxlength="80" placeholder="VD: Sổ của Thiện" /></div>
+          <div class="profile-id-row"><span>Mã sổ:</span><code id="profileIdDisplay"></code></div>
         </div>
-        <div class="modal-footer">
-          <button class="btn-modal btn-modal-cancel" onclick="closeProfileModal()">Hủy</button>
-          <button class="btn-modal btn-modal-save" onclick="saveLocalProfile()">
-            <i class="fas fa-save"></i> Lưu hồ sơ
-          </button>
-        </div>
+        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeProfileModal()">Hủy</button><button class="btn-modal btn-modal-save" onclick="saveLocalProfile()"><i class="fas fa-save"></i> Lưu hồ sơ</button></div>
       </div>
     </div>
 

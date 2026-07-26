@@ -212,6 +212,8 @@ let nextEntryId = 1;
 const DATA_VERSION = 2;
 const SUMMARY_FILE_TYPE = "conhon-session-summary";
 let activeViewDate = getCurrentDate();
+let activeViewDateFrom = getCurrentDate();
+let activeViewDateTo = getCurrentDate();
 let activeViewSession = new Date().getHours() < 12 ? "Sáng" : "Chiều";
 let lastKnownToday = getCurrentDate();
 
@@ -247,7 +249,8 @@ function isDirectEntry(entry) {
 function getVisibleEntries() {
   return ledgerData.filter(
     (entry) =>
-      entry.date === activeViewDate &&
+      entry.date >= activeViewDateFrom &&
+      entry.date <= activeViewDateTo &&
       (!activeViewSession || entry.session === activeViewSession)
   );
 }
@@ -266,9 +269,13 @@ function updateLastUpdateBadge() {
 // Thêm hàm để lấy ngày hiện tại theo định dạng YYYY-MM-DD
 function getCurrentDate() {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
+  return formatDateForInput(today);
+}
+
+function formatDateForInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -433,6 +440,9 @@ function refreshAllViews() {
   updateSellerSummary();
   updateWinSellerFilter();
   updateFinanceDashboard();
+  updateHomeDashboard();
+  renderImportedEntries();
+  updateExportSummaryPreview();
   updateExportSessionButton();
   updateStorageUsage();
 }
@@ -490,6 +500,8 @@ function processLedgerEntry() {
   addRecentSeller(seller);
 
   activeViewDate = date;
+  activeViewDateFrom = date;
+  activeViewDateTo = date;
   activeViewSession = session;
   syncViewControls();
 
@@ -620,15 +632,18 @@ function formatEntryLinesHtml(entry) {
   if (!entry.entries || entry.entries.length === 0) {
     return `<div>${escapeHtml(entry.content || "")}</div>`;
   }
-  return entry.entries
-    .map(
-      (item) => `
-        <div class="ledger-content-line">
-          <span>${escapeHtml(getAnimalNoteName(item.animal))}</span>
-          <span>${escapeHtml(formatAmountForNote(item.amount))}</span>
-        </div>`
-    )
-    .join("");
+  return `
+    <div class="ledger-content-chips">
+      ${entry.entries
+        .map(
+          (item) => `
+            <span class="ledger-item-chip">
+              <span>${escapeHtml(getAnimalNoteName(item.animal))}</span>
+              <strong>${escapeHtml(formatAmountForNote(item.amount))}</strong>
+            </span>`
+        )
+        .join("")}
+    </div>`;
 }
 
 function getPaymentMeta(paymentType) {
@@ -672,6 +687,7 @@ function renderLedgerEntries() {
 
   if (filtered.length === 0) {
     container.innerHTML = '<div style="text-align:center;color:var(--text-light);padding:20px;">Chưa có dữ liệu ghi sổ</div>';
+    container.style.maxHeight = "none";
     return;
   }
 
@@ -724,6 +740,37 @@ function renderLedgerEntries() {
       </div>
     `;
   }).join("");
+  scheduleLedgerHistoryHeight();
+}
+
+function scheduleLedgerHistoryHeight() {
+  window.requestAnimationFrame(() => {
+    const container = document.getElementById("ledgerEntries");
+    if (!container || container.offsetParent === null) return;
+    const entries = Array.from(container.querySelectorAll(".ledger-entry"));
+    if (entries.length <= 4) {
+      container.style.maxHeight = "none";
+      container.classList.remove("history-scroll-active");
+      return;
+    }
+
+    const styles = getComputedStyle(container);
+    const padding =
+      (parseFloat(styles.paddingTop) || 0) +
+      (parseFloat(styles.paddingBottom) || 0);
+    const fourEntriesHeight = entries.slice(0, 4).reduce((height, entry) => {
+      const entryStyles = getComputedStyle(entry);
+      return (
+        height +
+        entry.offsetHeight +
+        (parseFloat(entryStyles.marginBottom) || 0)
+      );
+    }, 0);
+    container.style.maxHeight = `${Math.ceil(
+      padding + fourEntriesHeight
+    )}px`;
+    container.classList.add("history-scroll-active");
+  });
 }
 
 // ===== EDIT MODAL =====
@@ -873,27 +920,29 @@ function updateSellerSummary() {
   const grandTotal = sellers.reduce((sum, [, total]) => sum + total, 0);
 
   body.innerHTML = `
-    <table class="seller-summary-table">
-      <thead>
-        <tr><th>Người bán</th><th>Tổng tiền</th><th>Tỷ lệ</th></tr>
-      </thead>
-      <tbody>
-        ${sellers.map(([seller, total]) => `
+    <div class="seller-summary-scroll">
+      <table class="seller-summary-table">
+        <thead>
+          <tr><th>Người bán</th><th>Tổng tiền</th><th>Tỷ lệ</th></tr>
+        </thead>
+        <tbody>
+          ${sellers.map(([seller, total]) => `
+            <tr>
+              <td><i class="fas fa-store"></i> ${escapeHtml(seller)}</td>
+              <td class="seller-total-amount">${total.toLocaleString("vi-VN")} đ</td>
+              <td>${grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0}%</td>
+            </tr>
+          `).join("")}
+        </tbody>
+        <tfoot>
           <tr>
-            <td><i class="fas fa-store"></i> ${escapeHtml(seller)}</td>
-            <td class="seller-total-amount">${total.toLocaleString("vi-VN")} đ</td>
-            <td>${grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0}%</td>
+            <td><strong>Tổng cộng</strong></td>
+            <td class="seller-total-amount"><strong>${grandTotal.toLocaleString("vi-VN")} đ</strong></td>
+            <td><strong>100%</strong></td>
           </tr>
-        `).join("")}
-      </tbody>
-      <tfoot>
-        <tr>
-          <td><strong>Tổng cộng</strong></td>
-          <td class="seller-total-amount"><strong>${grandTotal.toLocaleString("vi-VN")} đ</strong></td>
-          <td><strong>100%</strong></td>
-        </tr>
-      </tfoot>
-    </table>
+        </tfoot>
+      </table>
+    </div>
   `;
 }
 
@@ -954,13 +1003,17 @@ function filterWinningEntries() {
   const seller = document.getElementById('winSeller')?.value || '';
   const sessionLabel = session || 'Cả ngày';
   const sellerLabel = seller || 'Tất cả';
-  titleEl.textContent = `Phiếu chứa: ${a.type} (${a.name}) — ${activeViewDate} — ${sessionLabel} — NB: ${sellerLabel}`;
+  const dateLabel =
+    activeViewDateFrom === activeViewDateTo
+      ? activeViewDateFrom
+      : `${activeViewDateFrom} đến ${activeViewDateTo}`;
+  titleEl.textContent = `Phiếu chứa: ${a.type} (${a.name}) — ${dateLabel} — ${sessionLabel} — NB: ${sellerLabel}`;
 
   // Tìm tất cả phiếu có chứa con này
   const matches = [];
 
   ledgerData.forEach((entry) => {
-    if (entry.date !== activeViewDate) return;
+    if (entry.date < activeViewDateFrom || entry.date > activeViewDateTo) return;
     // Lọc buổi nếu có chọn
     if (session && entry.session !== session) return;
     // Lọc người bán nếu có chọn
@@ -1157,25 +1210,169 @@ document.getElementById("ledgerContent").addEventListener("input", function () {
   renderParsePreview(entries, parsed.errors);
 });
 
-// ===== TAB SWITCHING =====
-function initTabs() {
-  document.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      // Deactivate all
-      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-      // Activate clicked
-      btn.classList.add("active");
-      document.getElementById(btn.dataset.tab).classList.add("active");
+// ===== ĐIỀU HƯỚNG PHÂN HỆ =====
+const PAGE_META = {
+  home: ["Trang chủ", "Hệ thống / Trang chủ"],
+  "ledger-entry": ["Sổ ghi", "Quản lý sổ ghi / Sổ ghi"],
+  "ledger-history": ["Lịch sử ghi sổ", "Quản lý sổ ghi / Lịch sử ghi sổ"],
+  "payout-lookup": ["Tra cứu con xổ", "Quản lý trả thưởng / Tra cứu con xổ"],
+  "payout-pending": ["Phiếu cần trả", "Quản lý trả thưởng / Phiếu cần trả"],
+  "payout-history": ["Lịch sử trả thưởng", "Quản lý trả thưởng / Lịch sử trả thưởng"],
+  "finance-overview": ["Tổng quan doanh thu", "Doanh thu & công nợ / Tổng quan"],
+  "finance-debt": ["Công nợ khách hàng", "Doanh thu & công nợ / Công nợ khách hàng"],
+  "finance-source": ["Tổng theo nguồn", "Doanh thu & công nợ / Tổng theo nguồn"],
+  "data-import": ["Nhập từ cấp dưới", "Tổng hợp dữ liệu / Nhập từ cấp dưới"],
+  "data-imported": ["Phiếu cấp dưới", "Tổng hợp dữ liệu / Phiếu cấp dưới"],
+  "data-export": ["Xuất lên cấp trên", "Tổng hợp dữ liệu / Xuất lên cấp trên"],
+  "tools-report": ["Xuất báo cáo", "Báo cáo & tiện ích / Xuất báo cáo"],
+  "tools-backup": ["Sao lưu & khôi phục", "Báo cáo & tiện ích / Sao lưu & khôi phục"],
+  "tools-profile": ["Hồ sơ sổ", "Báo cáo & tiện ích / Hồ sơ sổ"],
+  "tools-data": ["Quản lý dữ liệu", "Báo cáo & tiện ích / Quản lý dữ liệu"],
+};
+
+function getCurrentRoute() {
+  const route = window.location.hash.replace(/^#\/?/, "");
+  return PAGE_META[route] ? route : "home";
+}
+
+function showRoute(route) {
+  const validRoute = PAGE_META[route] ? route : "home";
+  document.body.classList.toggle("home-route", validRoute === "home");
+  document.body.classList.toggle("ledger-route", validRoute === "ledger-entry");
+  document.querySelectorAll("[data-route-page]").forEach((page) => {
+    page.classList.toggle("active", page.dataset.routePage === validRoute);
+  });
+  document.querySelectorAll(".erp-nav-link[data-route-link]").forEach((link) => {
+    link.classList.toggle("active", link.dataset.routeLink === validRoute);
+  });
+  const activeNavLink = document.querySelector(
+    `.erp-nav-link[data-route-link="${validRoute}"]`
+  );
+  const activeGroup = activeNavLink?.closest(".erp-nav-group");
+  if (activeGroup?.classList.contains("collapsed")) {
+    setNavGroupCollapsed(activeGroup, false, false);
+  }
+
+  const [title, breadcrumb] = PAGE_META[validRoute];
+  const titleElement = document.getElementById("pageTitle");
+  const breadcrumbElement = document.getElementById("pageBreadcrumb");
+  if (titleElement) titleElement.textContent = title;
+  if (breadcrumbElement) breadcrumbElement.textContent = breadcrumb;
+  document.title = `${title} - Quản lý sổ ghi`;
+
+  document.body.classList.remove("sidebar-open");
+  window.scrollTo({ top: 0, behavior: "instant" });
+  if (validRoute === "ledger-history") scheduleLedgerHistoryHeight();
+}
+
+function navigateToRoute(route) {
+  const targetHash = `#/${route}`;
+  if (window.location.hash === targetHash) showRoute(route);
+  else window.location.hash = targetHash;
+}
+
+function toggleAppSidebar(open) {
+  const isMobile = window.matchMedia("(max-width: 980px)").matches;
+  if (isMobile) {
+    const shouldOpen =
+      typeof open === "boolean"
+        ? open
+        : !document.body.classList.contains("sidebar-open");
+    document.body.classList.toggle("sidebar-open", shouldOpen);
+    return;
+  }
+
+  const shouldCollapse =
+    typeof open === "boolean"
+      ? !open
+      : !document.body.classList.contains("sidebar-collapsed");
+  document.body.classList.toggle("sidebar-collapsed", shouldCollapse);
+  localStorage.setItem("coNhonSidebarCollapsed", String(shouldCollapse));
+}
+
+function getCollapsedNavGroups() {
+  try {
+    return new Set(
+      JSON.parse(localStorage.getItem("coNhonCollapsedNavGroups") || "[]")
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedNavGroups() {
+  const collapsed = Array.from(
+    document.querySelectorAll(".erp-nav-group.collapsed")
+  ).map((group) => group.dataset.navGroup);
+  localStorage.setItem("coNhonCollapsedNavGroups", JSON.stringify(collapsed));
+}
+
+function setNavGroupCollapsed(group, collapsed, persist = true) {
+  if (!group) return;
+  group.classList.toggle("collapsed", collapsed);
+  const toggle = group.querySelector("[data-nav-group-toggle]");
+  if (toggle) toggle.setAttribute("aria-expanded", String(!collapsed));
+  if (persist) saveCollapsedNavGroups();
+}
+
+function initNavGroups() {
+  const collapsedGroups = getCollapsedNavGroups();
+  document.querySelectorAll(".erp-nav-group").forEach((group) => {
+    setNavGroupCollapsed(
+      group,
+      collapsedGroups.has(group.dataset.navGroup),
+      false
+    );
+  });
+  document.querySelectorAll("[data-nav-group-toggle]").forEach((toggle) => {
+    toggle.addEventListener("click", () => {
+      const group = toggle.closest(".erp-nav-group");
+      setNavGroupCollapsed(group, !group.classList.contains("collapsed"));
     });
   });
 }
 
+function initTabs() {
+  if (localStorage.getItem("coNhonSidebarCollapsed") === "true") {
+    document.body.classList.add("sidebar-collapsed");
+  }
+  initNavGroups();
+  document.querySelectorAll("[data-route-link]").forEach((button) => {
+    button.addEventListener("click", () => {
+      navigateToRoute(button.dataset.routeLink);
+    });
+  });
+  window.addEventListener("hashchange", () => showRoute(getCurrentRoute()));
+  showRoute(getCurrentRoute());
+}
+
 function syncViewControls() {
-  const viewDate = document.getElementById("viewDate");
-  if (viewDate) viewDate.value = activeViewDate;
+  const viewDateFrom = document.getElementById("viewDateFrom");
+  const viewDateTo = document.getElementById("viewDateTo");
+  if (viewDateFrom) viewDateFrom.value = activeViewDateFrom;
+  if (viewDateTo) viewDateTo.value = activeViewDateTo;
+  const dateRangeLabel = document.getElementById("dateRangeLabel");
+  if (dateRangeLabel) {
+    dateRangeLabel.textContent = `${formatDateForDisplay(
+      activeViewDateFrom
+    )} - ${formatDateForDisplay(activeViewDateTo)}`;
+  }
   document.querySelectorAll(".view-session-btn").forEach((button) => {
     button.classList.toggle("active", button.dataset.session === activeViewSession);
+  });
+  const rangeDays =
+    Math.round(
+      (new Date(`${activeViewDateTo}T00:00:00`) -
+        new Date(`${activeViewDateFrom}T00:00:00`)) /
+        86400000
+    ) + 1;
+  document.querySelectorAll(".quick-date-btn").forEach((button) => {
+    const expectedDays = Number(button.dataset.rangeDays);
+    const endsToday = activeViewDateTo === getCurrentDate();
+    button.classList.toggle(
+      "active",
+      endsToday && rangeDays === expectedDays
+    );
   });
 
   const winSession = document.getElementById("winSession");
@@ -1190,6 +1387,8 @@ function syncViewControls() {
 
 function setActiveView(date, session) {
   activeViewDate = date || getCurrentDate();
+  activeViewDateFrom = activeViewDate;
+  activeViewDateTo = activeViewDate;
   activeViewSession = session;
   syncViewControls();
   refreshAllViews();
@@ -1200,14 +1399,67 @@ function goToToday() {
   document.getElementById("ledgerDate").value = getCurrentDate();
 }
 
+function formatDateForDisplay(dateValue) {
+  const [year, month, day] = String(dateValue || "").split("-");
+  return year && month && day ? `${day}/${month}/${year}` : dateValue;
+}
+
+function closeDateRangePicker() {
+  const popover = document.getElementById("dateRangePopover");
+  const toggle = document.getElementById("dateRangeToggle");
+  if (popover) popover.classList.remove("show");
+  if (toggle) toggle.setAttribute("aria-expanded", "false");
+}
+
+function initDateRangePicker() {
+  const picker = document.getElementById("dateRangePicker");
+  const popover = document.getElementById("dateRangePopover");
+  const toggle = document.getElementById("dateRangeToggle");
+  if (!picker || !popover || !toggle) return;
+
+  toggle.addEventListener("click", () => {
+    const willOpen = !popover.classList.contains("show");
+    popover.classList.toggle("show", willOpen);
+    toggle.setAttribute("aria-expanded", String(willOpen));
+  });
+  document.addEventListener("click", (event) => {
+    if (!picker.contains(event.target)) closeDateRangePicker();
+  });
+}
+
 function initViewControls() {
-  const viewDate = document.getElementById("viewDate");
-  viewDate.value = activeViewDate;
-  viewDate.addEventListener("change", () => {
-    if (!viewDate.value) return;
-    activeViewDate = viewDate.value;
-    document.getElementById("ledgerDate").value = viewDate.value;
+  const viewDateFrom = document.getElementById("viewDateFrom");
+  const viewDateTo = document.getElementById("viewDateTo");
+  initDateRangePicker();
+
+  const applyCustomRange = () => {
+    if (!viewDateFrom.value || !viewDateTo.value) return;
+    if (viewDateFrom.value > viewDateTo.value) {
+      showNotification("Ngày bắt đầu không thể sau ngày kết thúc!", "error");
+      syncViewControls();
+      return;
+    }
+    activeViewDateFrom = viewDateFrom.value;
+    activeViewDateTo = viewDateTo.value;
+    activeViewDate = activeViewDateTo;
     refreshAllViews();
+    syncViewControls();
+  };
+  viewDateFrom.addEventListener("change", applyCustomRange);
+  viewDateTo.addEventListener("change", applyCustomRange);
+
+  document.querySelectorAll(".quick-date-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const days = Number(button.dataset.rangeDays) || 1;
+      const end = new Date(`${getCurrentDate()}T00:00:00`);
+      const start = new Date(end);
+      start.setDate(start.getDate() - days + 1);
+      activeViewDateFrom = formatDateForInput(start);
+      activeViewDateTo = formatDateForInput(end);
+      activeViewDate = activeViewDateTo;
+      syncViewControls();
+      refreshAllViews();
+    });
   });
 
   document.querySelectorAll(".view-session-btn").forEach((button) => {
@@ -1223,10 +1475,11 @@ function initViewControls() {
 function updateExportSessionButton() {
   const button = document.getElementById("exportSessionBtn");
   if (!button) return;
-  button.disabled = !activeViewSession;
-  button.title = activeViewSession
+  const isSingleDate = activeViewDateFrom === activeViewDateTo;
+  button.disabled = !activeViewSession || !isSingleDate;
+  button.title = activeViewSession && isSingleDate
     ? `Xuất phiếu tổng ${activeViewSession.toLowerCase()} ngày ${activeViewDate}`
-    : "Chọn buổi Sáng hoặc Chiều để xuất";
+    : "Chọn đúng một ngày và một buổi Sáng hoặc Chiều để xuất";
 }
 
 function setMoneyText(id, amount) {
@@ -1322,6 +1575,76 @@ function updateFinanceDashboard() {
   }
 }
 
+function updateHomeDashboard() {
+  const visible = getVisibleEntries();
+  const direct = visible.filter(isDirectEntry);
+  const imported = visible.filter((entry) => !isDirectEntry(entry));
+  const sumEntries = (entries) =>
+    entries.reduce((sum, entry) => sum + (Number(entry.total) || 0), 0);
+  const cash = sumEntries(direct.filter((entry) => entry.paymentType === "cash"));
+  const transfer = sumEntries(
+    direct.filter((entry) => entry.paymentType === "bank_transfer")
+  );
+  const debt = sumEntries(direct.filter((entry) => entry.paymentType === "debt"));
+
+  setMoneyText("homeRevenue", sumEntries(visible));
+  setMoneyText("homeCollected", cash + transfer);
+  setMoneyText("homeDebt", debt);
+  const importedCount = document.getElementById("homeImportedCount");
+  if (importedCount) importedCount.textContent = imported.length.toLocaleString("vi-VN");
+}
+
+function renderImportedEntries() {
+  const container = document.getElementById("importedEntriesList");
+  if (!container) return;
+  const imported = getVisibleEntries().filter((entry) => !isDirectEntry(entry));
+
+  if (imported.length === 0) {
+    container.innerHTML =
+      '<div class="empty-state">Chưa có phiếu cấp dưới trong ngày và buổi đang xem</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="imported-entry-list">
+      ${imported
+        .map(
+          (entry) => `
+            <article class="imported-entry">
+              <div class="imported-entry-source">
+                <strong>${escapeHtml(entry.sourceProfileName || entry.person || "Cấp dưới")}</strong>
+                <small>Mã nguồn: ${escapeHtml(entry.sourceProfileId || "Không xác định")}</small>
+              </div>
+              <span class="imported-entry-meta">${escapeHtml(entry.date)}</span>
+              <span class="imported-entry-meta">${escapeHtml(entry.session || "")}</span>
+              <strong class="imported-entry-total">${(Number(entry.total) || 0).toLocaleString("vi-VN")} đ</strong>
+            </article>`
+        )
+        .join("")}
+    </div>`;
+}
+
+function updateExportSummaryPreview() {
+  const preview = document.getElementById("exportSummaryPreview");
+  if (!preview) return;
+
+  if (!activeViewSession || activeViewDateFrom !== activeViewDateTo) {
+    preview.innerHTML =
+      '<div class="empty-state">Hãy chọn đúng một ngày và một buổi Sáng hoặc Chiều để xem trước phiếu xuất</div>';
+    return;
+  }
+
+  const entries = getSessionEntries(activeViewDate, activeViewSession);
+  const items = aggregateEntriesByAnimal(entries);
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+  preview.innerHTML = `
+    <div class="export-preview-grid">
+      <div class="export-preview-item"><span>Nguồn dữ liệu</span><strong>${escapeHtml(localProfile.name || "Chưa đặt tên sổ")}</strong></div>
+      <div class="export-preview-item"><span>Ngày / buổi</span><strong>${escapeHtml(activeViewDate)} · ${escapeHtml(activeViewSession)}</strong></div>
+      <div class="export-preview-item"><span>Dữ liệu sẽ xuất</span><strong>${items.length} con · ${total.toLocaleString("vi-VN")} đ</strong></div>
+    </div>`;
+}
+
 function updateStorageUsage() {
   const element = document.getElementById("storageUsage");
   if (!element) return;
@@ -1351,6 +1674,9 @@ function closeProfileModal() {
 function updateProfileButton() {
   const label = document.getElementById("profileButtonLabel");
   if (label) label.textContent = localProfile.name || "Tên sổ";
+  const pageName = document.getElementById("profilePageName");
+  if (pageName) pageName.textContent = localProfile.name || "Tên sổ chưa thiết lập";
+  updateExportSummaryPreview();
 }
 
 function saveLocalProfile() {
@@ -1412,8 +1738,8 @@ function downloadJson(data, fileName) {
 }
 
 function exportSessionSummary() {
-  if (!activeViewSession) {
-    showNotification("Chọn buổi Sáng hoặc Chiều để xuất!", "error");
+  if (!activeViewSession || activeViewDateFrom !== activeViewDateTo) {
+    showNotification("Chọn đúng một ngày và một buổi để xuất!", "error");
     return;
   }
   if (!localProfile.name) {
@@ -1582,6 +1908,8 @@ function importSessionSummary(event) {
       }
 
       activeViewDate = data.date;
+      activeViewDateFrom = data.date;
+      activeViewDateTo = data.date;
       activeViewSession = data.session;
       syncViewControls();
       refreshAllViews();
@@ -1633,10 +1961,14 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(() => {
     const today = getCurrentDate();
     if (today !== lastKnownToday) {
-      const wasViewingToday = activeViewDate === lastKnownToday;
+      const wasViewingToday =
+        activeViewDateFrom === lastKnownToday &&
+        activeViewDateTo === lastKnownToday;
       lastKnownToday = today;
       if (wasViewingToday) {
         activeViewDate = today;
+        activeViewDateFrom = today;
+        activeViewDateTo = today;
         document.getElementById("ledgerDate").value = today;
         syncViewControls();
         refreshAllViews();
