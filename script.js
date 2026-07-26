@@ -144,6 +144,26 @@ function performUndo() {
     return;
   }
   const action = undoStack.pop();
+  const affectedEntryId =
+    action.type === "add_entry"
+      ? action.entryId
+      : action.type === "edit_entry"
+        ? action.entry?.id
+        : null;
+  if (
+    affectedEntryId &&
+    debtPayments.some(
+      (payment) => String(payment.entryId) === String(affectedEntryId)
+    )
+  ) {
+    undoStack.push(action);
+    updateUndoButton();
+    showNotification(
+      "Không thể hoàn tác phiếu đã có lịch sử thu nợ!",
+      "error"
+    );
+    return;
+  }
   if (action.type === "add_entry") {
     ledgerData = ledgerData.filter((entry) => String(entry.id) !== String(action.entryId));
     showNotification("Đã hoàn tác ghi sổ!");
@@ -209,12 +229,14 @@ function updateSellerSuggestions() {
 // ===== DỮ LIỆU GHI SỔ CÓ CẤU TRÚC =====
 let ledgerData = [];
 let nextEntryId = 1;
-const DATA_VERSION = 2;
+const DATA_VERSION = 7;
 const SUMMARY_FILE_TYPE = "conhon-session-summary";
 let activeViewDate = getCurrentDate();
 let activeViewDateFrom = getCurrentDate();
 let activeViewDateTo = getCurrentDate();
 let activeViewSession = new Date().getHours() < 12 ? "Sáng" : "Chiều";
+let calendarCursor = new Date();
+let calendarAwaitingEnd = false;
 let lastKnownToday = getCurrentDate();
 
 function createUuid() {
@@ -238,6 +260,49 @@ function loadLocalProfile() {
 
 let localProfile = loadLocalProfile();
 
+function getSellerIdentity(sellerName) {
+  const name = String(sellerName || "").trim();
+  const normalizedName = removeVietnameseDiacritics(name).toLowerCase();
+  const normalizedProfile = removeVietnameseDiacritics(
+    localProfile.name || ""
+  ).toLowerCase();
+  const isSelf =
+    !name || (normalizedProfile && normalizedName === normalizedProfile);
+  return isSelf
+    ? {
+        seller: name || localProfile.name || "",
+        sellerSourceId: localProfile.id,
+        sellerRole: "self",
+      }
+    : {
+        seller: name,
+        sellerSourceId: `manual:${normalizedName}`,
+        sellerRole: "child",
+      };
+}
+
+function applySellerIdentity(entry, sellerName) {
+  const identity = getSellerIdentity(sellerName);
+  entry.seller = identity.seller;
+  entry.sellerSourceId = identity.sellerSourceId;
+  entry.sellerRole = identity.sellerRole;
+}
+
+function useCurrentProfileAsSeller() {
+  const input = document.getElementById("ledgerSeller");
+  if (!input) return;
+  input.value = localProfile.name || "";
+  input.focus();
+}
+
+function initializeDefaultSeller(force = false) {
+  const input = document.getElementById("ledgerSeller");
+  if (!input) return;
+  if (force || !input.value.trim()) {
+    input.value = localProfile.name || "";
+  }
+}
+
 function findEntryById(entryId) {
   return ledgerData.find((entry) => String(entry.id) === String(entryId));
 }
@@ -256,7 +321,18 @@ function getVisibleEntries() {
 }
 
 // ===== ĐÁNH DẤU ĐÃ CHUNG TIỀN =====
-let paidEntries = {}; // { entryId: true }
+let paidEntries = {}; // Dữ liệu cũ, chỉ dùng để chuyển đổi.
+let drawResults = {}; // { "YYYY-MM-DD|Buổi": { animalId, confirmedAt, updatedAt } }
+let payoutStates = {}; // { "drawKey|entryId": { rate, paid, paidAt, snapshot } }
+let activePayoutStatus = "unpaid";
+let debtPayments = [];
+let financeSettings = {
+  ownerRate: 20,
+  defaultChildRate: 15,
+  ownerPayoutRate: 28,
+  defaultPayoutRate: 27,
+  sourceConfigs: {},
+};
 
 // ===== CẬP NHẬT BADGE LẦN CUỐI =====
 function updateLastUpdateBadge() {
@@ -439,6 +515,8 @@ function refreshAllViews() {
   renderLedgerEntries();
   updateSellerSummary();
   updateWinSellerFilter();
+  syncPayoutLookupForActiveView();
+  renderPayoutHistory();
   updateFinanceDashboard();
   updateHomeDashboard();
   renderImportedEntries();
@@ -452,7 +530,10 @@ function processLedgerEntry() {
   const date = document.getElementById("ledgerDate").value;
   const session = document.querySelector('input[name="session"]:checked').value;
   const person = document.getElementById("ledgerPerson").value;
-  const seller = document.getElementById("ledgerSeller").value;
+  const seller =
+    document.getElementById("ledgerSeller").value.trim() ||
+    localProfile.name ||
+    "";
   const content = document.getElementById("ledgerContent").value;
   const paymentType =
     document.querySelector('input[name="paymentType"]:checked')?.value || "";
@@ -492,6 +573,7 @@ function processLedgerEntry() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  applySellerIdentity(entryRecord, seller);
   ledgerData.unshift(entryRecord);
   pushUndo({ type: "add_entry", entryId: entryRecord.id });
 
@@ -774,9 +856,24 @@ function scheduleLedgerHistoryHeight() {
 }
 
 // ===== EDIT MODAL =====
+function hasPaidPayoutForEntry(entryId) {
+  return Object.values(payoutStates).some(
+    (state) =>
+      state.paid &&
+      String(state.snapshot?.entryId || "") === String(entryId)
+  );
+}
+
 function openEditModal(entryId) {
   const entry = findEntryById(entryId);
   if (!entry) return;
+  if (hasPaidPayoutForEntry(entryId)) {
+    showNotification(
+      "Phiếu đã được chung thưởng. Hãy bỏ trạng thái đã chung trước khi sửa!",
+      "error"
+    );
+    return;
+  }
   if (!isDirectEntry(entry)) {
     showNotification("Phiếu cấp dưới chỉ được cập nhật bằng cách import lại!", "error");
     return;
@@ -830,13 +927,29 @@ function saveEditedEntry() {
     return;
   }
 
+  const newTotal = newEntries.reduce((sum, e) => sum + e.amount, 0);
+  const debtPaidAmount = getDebtPaidAmount(entry.id);
+  if (debtPaidAmount > 0 && newPaymentType !== "debt") {
+    showNotification(
+      "Phiếu đã có giao dịch thu nợ nên không thể đổi sang hình thức khác!",
+      "error"
+    );
+    return;
+  }
+  if (debtPaidAmount > newTotal) {
+    showNotification(
+      "Tổng phiếu mới không thể nhỏ hơn số tiền khách đã trả!",
+      "error"
+    );
+    return;
+  }
+
   pushUndo({ type: "edit_entry", entry: JSON.parse(JSON.stringify(entry)) });
 
-  const newTotal = newEntries.reduce((sum, e) => sum + e.amount, 0);
   entry.date = newDate;
   entry.session = newSession;
   entry.person = newPerson;
-  entry.seller = newSeller;
+  applySellerIdentity(entry, newSeller);
   entry.content = newContent;
   entry.total = newTotal;
   entry.entries = newEntries;
@@ -851,6 +964,24 @@ function saveEditedEntry() {
 
 // ===== DELETE ENTRY =====
 function deleteLedgerEntry(entryId) {
+  if (hasPaidPayoutForEntry(entryId)) {
+    showNotification(
+      "Phiếu đã được chung thưởng. Hãy bỏ trạng thái đã chung trước khi xóa!",
+      "error"
+    );
+    return;
+  }
+  if (
+    debtPayments.some(
+      (payment) => String(payment.entryId) === String(entryId)
+    )
+  ) {
+    showNotification(
+      "Phiếu đã có lịch sử thu nợ nên không thể xóa!",
+      "error"
+    );
+    return;
+  }
   if (!confirm("Bạn có chắc muốn xóa mục ghi sổ này?")) return;
 
   const entryIndex = ledgerData.findIndex((e) => String(e.id) === String(entryId));
@@ -954,8 +1085,11 @@ function updateWinSellerFilter() {
   const sellers = [
     ...new Set(
       getVisibleEntries()
-        .filter(isDirectEntry)
-        .map((e) => e.seller)
+        .map((entry) =>
+          isDirectEntry(entry)
+            ? entry.seller
+            : entry.sourceProfileName || entry.person
+        )
         .filter(Boolean)
     ),
   ];
@@ -964,7 +1098,7 @@ function updateWinSellerFilter() {
     sellers.map((s) => `<option value="${escapeHtml(s)}" ${s === currentVal ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
 }
 
-function populateWinAnimalSelect() {
+function legacyPopulateWinAnimalSelect() {
   const sel = document.getElementById('winAnimal');
   if (!sel) return;
   sel.innerHTML = '<option value="">-- Chọn con --</option>';
@@ -982,7 +1116,7 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function filterWinningEntries() {
+function legacyFilterWinningEntries() {
   const session = document.getElementById('winSession')?.value || '';
   const animalIndexStr = document.getElementById('winAnimal')?.value;
   const card = document.getElementById('winResultCard');
@@ -1142,7 +1276,7 @@ function filterWinningEntries() {
   showNotification(`Tìm thấy ${totalEntries} phiếu chứa ${a.type}!`);
 }
 
-function togglePaidStatus(entryId) {
+function legacyTogglePaidStatus(entryId) {
   if (paidEntries[entryId]) {
     delete paidEntries[entryId];
   } else {
@@ -1168,7 +1302,7 @@ function togglePaidStatus(entryId) {
   updateWinPaidSummary();
 }
 
-function updateWinPaidSummary() {
+function legacyUpdateWinPaidSummary() {
   const summaryEl = document.getElementById('winPaidSummary');
   if (!summaryEl) return;
 
@@ -1199,6 +1333,709 @@ function updateWinPaidSummary() {
   `;
 }
 
+// ===== QUẢN LÝ KẾT QUẢ XỔ VÀ CHUNG THƯỞNG =====
+function getAnimalSearchLabel(index) {
+  const animal = animals[index];
+  return animal ? `${animal.id} - ${animal.name} (${animal.type})` : "";
+}
+
+function populateWinAnimalSelect() {
+  const suggestions = document.getElementById("winAnimalSuggestions");
+  if (suggestions) {
+    suggestions.innerHTML = animals
+      .map(
+        (_, index) =>
+          `<option value="${escapeHtml(getAnimalSearchLabel(index))}"></option>`
+      )
+      .join("");
+  }
+}
+
+function resolveAnimalSearch(value) {
+  const normalized = removeVietnameseDiacritics(String(value || ""))
+    .toLowerCase()
+    .trim();
+  if (!normalized) return -1;
+
+  const exactLabelIndex = animals.findIndex(
+    (_, index) =>
+      removeVietnameseDiacritics(getAnimalSearchLabel(index)).toLowerCase() ===
+      normalized
+  );
+  if (exactLabelIndex !== -1) return exactLabelIndex;
+
+  const idMatch = animals.findIndex((animal) => animal.id === normalized);
+  if (idMatch !== -1) return idMatch;
+
+  const aliasIndex = animalNameToIndex[normalized];
+  if (aliasIndex !== undefined) return aliasIndex;
+
+  const matches = animals
+    .map((animal, index) => ({
+      index,
+      text: removeVietnameseDiacritics(
+        `${animal.id} ${animal.name} ${animal.type} ${getAnimalNoteName(
+          animal.type.toLowerCase()
+        )}`
+      ).toLowerCase(),
+    }))
+    .filter((item) => item.text.includes(normalized));
+  return matches.length === 1 ? matches[0].index : -1;
+}
+
+function getDrawKey(date, session) {
+  return `${date}|${session}`;
+}
+
+function getPayoutStateKey(drawKey, entryId) {
+  return `${drawKey}|${entryId}`;
+}
+
+function getPayoutRecipient(entry) {
+  return isDirectEntry(entry)
+    ? {
+        name: entry.person || "Không rõ",
+        type: "Khách trực tiếp",
+        source: entry.seller || "",
+      }
+    : {
+        name: entry.sourceProfileName || entry.person || "Cấp dưới",
+        type: "Cấp dưới",
+        source: entry.sourceProfileName || entry.person || "",
+      };
+}
+
+function getCurrentDrawContext() {
+  const sessionElement = document.getElementById("winSession");
+  const session = ["Sáng", "Chiều"].includes(sessionElement?.value)
+    ? sessionElement.value
+    : ["Sáng", "Chiều"].includes(activeViewSession)
+      ? activeViewSession
+      : "Sáng";
+  if (activeViewDateFrom !== activeViewDateTo) return null;
+  return {
+    date: activeViewDateFrom,
+    session,
+    drawKey: getDrawKey(activeViewDateFrom, session),
+  };
+}
+
+function buildPayoutSnapshot(entry, draw, animalIndex, hitSum, rate) {
+  const recipient = getPayoutRecipient(entry);
+  const animal = animals[animalIndex];
+  return {
+    entryId: String(entry.id),
+    drawKey: draw.drawKey,
+    date: draw.date,
+    session: draw.session,
+    animalId: animal.id,
+    animalName: animal.name,
+    animalType: animal.type,
+    recipientName: recipient.name,
+    recipientType: recipient.type,
+    seller: entry.seller || "",
+    sourceName: recipient.source,
+    hitAmount: hitSum,
+    rate,
+    payoutAmount: hitSum * rate,
+    entryTotal: Number(entry.total) || 0,
+    entryContent: entry.content || formatEntryAsText(entry),
+  };
+}
+
+function ensurePayoutState(draw, entry, animalIndex, hitSum) {
+  const key = getPayoutStateKey(draw.drawKey, entry.id);
+  const defaultRate = getDefaultPayoutRateForEntry(entry);
+  if (!payoutStates[key]) {
+    const legacyPaid = Boolean(paidEntries[String(entry.id)]);
+    payoutStates[key] = {
+      rate: defaultRate,
+      rateMode: "default",
+      paid: legacyPaid,
+      paidAt: legacyPaid
+        ? entry.updatedAt || entry.createdAt || new Date().toISOString()
+        : null,
+      snapshot: legacyPaid
+        ? buildPayoutSnapshot(entry, draw, animalIndex, hitSum, defaultRate)
+        : null,
+    };
+    if (legacyPaid) delete paidEntries[String(entry.id)];
+  }
+  const state = payoutStates[key];
+  if (!state.rateMode) state.rateMode = "manual";
+  if (state.rateMode === "default" && !state.paid) state.rate = defaultRate;
+  if (![27, 28, 29, 30].includes(Number(state.rate))) {
+    state.rate = defaultRate;
+    state.rateMode = "default";
+  }
+  return { key, state };
+}
+
+function getConfirmedDraw() {
+  const draw = getCurrentDrawContext();
+  if (!draw) return null;
+  const result = drawResults[draw.drawKey];
+  if (!result) return null;
+  const animalIndex = animals.findIndex(
+    (animal) => animal.id === String(result.animalId)
+  );
+  return animalIndex === -1 ? null : { ...draw, result, animalIndex };
+}
+
+function renderWinConfirmation(draw, animalIndex, confirmed) {
+  const element = document.getElementById("winConfirmation");
+  if (!element) return;
+  if (!draw) {
+    element.innerHTML =
+      '<i class="fas fa-triangle-exclamation"></i><span>Tra cứu trả thưởng chỉ áp dụng cho đúng một ngày.</span>';
+    element.className = "win-confirmation warning";
+    return;
+  }
+  if (!confirmed || animalIndex < 0) {
+    element.innerHTML = `<i class="far fa-circle"></i><span>Ngày <strong>${formatDateForDisplay(
+      draw.date
+    )}</strong>, buổi <strong>${
+      draw.session
+    }</strong> chưa xác nhận con xổ.</span>`;
+    element.className = "win-confirmation pending";
+    return;
+  }
+  const animal = animals[animalIndex];
+  element.innerHTML = `<i class="fas fa-circle-check"></i><span>Đã xác nhận: <strong>${escapeHtml(
+    getAnimalSearchLabel(animalIndex)
+  )}</strong> · ${formatDateForDisplay(draw.date)} · ${draw.session}</span>`;
+  element.className = "win-confirmation confirmed";
+}
+
+function syncPayoutLookupForActiveView() {
+  const search = document.getElementById("winAnimalSearch");
+  const hidden = document.getElementById("winAnimal");
+  const sessionElement = document.getElementById("winSession");
+  const resultCard = document.getElementById("winResultCard");
+  if (!search || !hidden || !sessionElement) return;
+
+  if (["Sáng", "Chiều"].includes(activeViewSession)) {
+    sessionElement.value = activeViewSession;
+  } else if (!["Sáng", "Chiều"].includes(sessionElement.value)) {
+    sessionElement.value = "Sáng";
+  }
+
+  const draw = getCurrentDrawContext();
+  const confirmed = draw ? drawResults[draw.drawKey] : null;
+  const animalIndex = confirmed
+    ? animals.findIndex(
+        (animal) => animal.id === String(confirmed.animalId)
+      )
+    : -1;
+
+  if (animalIndex !== -1) {
+    search.value = getAnimalSearchLabel(animalIndex);
+    hidden.value = String(animalIndex);
+    renderWinConfirmation(draw, animalIndex, true);
+    filterWinningEntries(false);
+  } else {
+    search.value = "";
+    hidden.value = "";
+    renderWinConfirmation(draw, -1, false);
+    if (resultCard) resultCard.style.display = "none";
+    updatePayoutStatusCounts([]);
+  }
+}
+
+function confirmWinningAnimal() {
+  const draw = getCurrentDrawContext();
+  if (!draw) {
+    showNotification("Hãy chọn đúng một ngày để xác nhận con xổ!", "error");
+    return;
+  }
+
+  const search = document.getElementById("winAnimalSearch");
+  const animalIndex = resolveAnimalSearch(search?.value);
+  if (animalIndex === -1) {
+    showNotification(
+      "Không xác định được con xổ. Hãy chọn đúng một gợi ý!",
+      "error"
+    );
+    return;
+  }
+
+  const existing = drawResults[draw.drawKey];
+  const nextAnimal = animals[animalIndex];
+  if (existing && String(existing.animalId) !== nextAnimal.id) {
+    const hasPaid = Object.entries(payoutStates).some(
+      ([key, state]) => key.startsWith(`${draw.drawKey}|`) && state.paid
+    );
+    if (hasPaid) {
+      showNotification(
+        "Kỳ xổ này đã có phiếu được chung. Hãy bỏ đánh dấu đã chung trước khi đổi con xổ!",
+        "error"
+      );
+      return;
+    }
+    if (
+      !confirm(
+        `Đổi con xổ ${formatDateForDisplay(draw.date)} ${
+          draw.session
+        } thành ${getAnimalSearchLabel(animalIndex)}?`
+      )
+    ) {
+      return;
+    }
+    Object.keys(payoutStates)
+      .filter((key) => key.startsWith(`${draw.drawKey}|`))
+      .forEach((key) => delete payoutStates[key]);
+  }
+
+  drawResults[draw.drawKey] = {
+    animalId: nextAnimal.id,
+    confirmedAt: existing?.confirmedAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  document.getElementById("winAnimal").value = String(animalIndex);
+  search.value = getAnimalSearchLabel(animalIndex);
+  saveDataToLocalStorage();
+  renderWinConfirmation(draw, animalIndex, true);
+  filterWinningEntries(false);
+  updateFinanceDashboard();
+  showNotification(
+    `Đã lưu con xổ buổi ${draw.session.toLowerCase()}: ${nextAnimal.type}!`
+  );
+}
+
+function getPayoutMatches(confirmedDraw) {
+  const seller = document.getElementById("winSeller")?.value || "";
+  const matches = [];
+  ledgerData.forEach((entry) => {
+    if (
+      entry.date !== confirmedDraw.date ||
+      entry.session !== confirmedDraw.session
+    ) {
+      return;
+    }
+    const recipient = getPayoutRecipient(entry);
+    const sourceFilter = entry.seller || recipient.name;
+    if (seller && sourceFilter !== seller) return;
+
+    const hitItems = (entry.entries || []).filter(
+      (item) =>
+        animalNameToIndex[item.animal] === confirmedDraw.animalIndex
+    );
+    if (hitItems.length === 0) return;
+    const hitSum = hitItems.reduce(
+      (sum, item) => sum + (Number(item.amount) || 0),
+      0
+    );
+    const { key, state } = ensurePayoutState(
+      confirmedDraw,
+      entry,
+      confirmedDraw.animalIndex,
+      hitSum
+    );
+    matches.push({ entry, recipient, hitItems, hitSum, key, state });
+  });
+  return matches;
+}
+
+function updatePayoutStatusCounts(matches) {
+  const paid = matches.filter((match) => match.state.paid).length;
+  const unpaid = matches.length - paid;
+  const allElement = document.getElementById("payoutAllCount");
+  const paidElement = document.getElementById("payoutPaidCount");
+  const unpaidElement = document.getElementById("payoutUnpaidCount");
+  if (allElement) allElement.textContent = matches.length;
+  if (paidElement) paidElement.textContent = paid;
+  if (unpaidElement) unpaidElement.textContent = unpaid;
+}
+
+function setPayoutStatusFilter(status) {
+  if (!["all", "paid", "unpaid"].includes(status)) return;
+  activePayoutStatus = status;
+  document.querySelectorAll("[data-payout-status]").forEach((button) => {
+    button.classList.toggle(
+      "active",
+      button.dataset.payoutStatus === activePayoutStatus
+    );
+  });
+  filterWinningEntries(false);
+}
+
+function formatWinningContent(entry, animalIndex) {
+  return `
+    <div class="ledger-content-chips">
+      ${(entry.entries || [])
+        .map((item) => {
+          const isWinner = animalNameToIndex[item.animal] === animalIndex;
+          return `<span class="ledger-item-chip${
+            isWinner ? " win-highlight-chip" : ""
+          }"><span>${escapeHtml(
+            getAnimalNoteName(item.animal)
+          )}</span><strong>${escapeHtml(
+            formatAmountForNote(item.amount)
+          )}</strong></span>`;
+        })
+        .join("")}
+    </div>`;
+}
+
+function filterWinningEntries(showToast = true) {
+  const confirmedDraw = getConfirmedDraw();
+  const card = document.getElementById("winResultCard");
+  const body = document.getElementById("winResultBody");
+  const title = document.getElementById("winResultTitle");
+  if (!card || !body || !title) return;
+
+  if (!confirmedDraw) {
+    card.style.display = "none";
+    return;
+  }
+
+  const animal = animals[confirmedDraw.animalIndex];
+  const allMatches = getPayoutMatches(confirmedDraw);
+  updatePayoutStatusCounts(allMatches);
+  const visibleMatches = allMatches.filter((match) => {
+    if (activePayoutStatus === "paid") return match.state.paid;
+    if (activePayoutStatus === "unpaid") return !match.state.paid;
+    return true;
+  });
+
+  const totalHit = allMatches.reduce(
+    (sum, match) => sum + match.hitSum,
+    0
+  );
+  const totalPayout = allMatches.reduce(
+    (sum, match) => sum + match.hitSum * Number(match.state.rate),
+    0
+  );
+  const paidMatches = allMatches.filter((match) => match.state.paid);
+  const paidPayout = paidMatches.reduce(
+    (sum, match) => sum + match.hitSum * Number(match.state.rate),
+    0
+  );
+  const unpaidPayout = totalPayout - paidPayout;
+
+  title.textContent = `${getAnimalSearchLabel(
+    confirmedDraw.animalIndex
+  )} · ${formatDateForDisplay(confirmedDraw.date)} · ${
+    confirmedDraw.session
+  }`;
+
+  body.innerHTML = `
+    <div class="win-summary">
+      <div class="win-summary-grid">
+        <div class="win-stat"><div class="win-stat-label"><i class="fas fa-receipt"></i> Số phiếu trúng</div><div class="win-stat-value">${
+          allMatches.length
+        }</div></div>
+        <div class="win-stat"><div class="win-stat-label"><i class="fas fa-coins"></i> Tiền đánh ${
+          animal.type
+        }</div><div class="win-stat-value win-stat-money">${totalHit.toLocaleString(
+          "vi-VN"
+        )} đ</div></div>
+        <div class="win-stat win-stat-payout"><div class="win-stat-label"><i class="fas fa-hand-holding-dollar"></i> Tổng tiền phải chung</div><div class="win-stat-value win-stat-payout-value">${totalPayout.toLocaleString(
+          "vi-VN"
+        )} đ</div></div>
+      </div>
+      <div class="win-paid-summary">
+        <div class="win-paid-stat win-paid-done"><i class="fas fa-check-circle"></i><span>Đã chung: <strong>${
+          paidMatches.length
+        }</strong> phiếu — <strong>${paidPayout.toLocaleString(
+          "vi-VN"
+        )} đ</strong></span></div>
+        <div class="win-paid-stat win-paid-pending"><i class="far fa-circle"></i><span>Chưa chung: <strong>${
+          allMatches.length - paidMatches.length
+        }</strong> phiếu — <strong>${unpaidPayout.toLocaleString(
+          "vi-VN"
+        )} đ</strong></span></div>
+      </div>
+    </div>
+    <div class="win-list">
+      ${
+        visibleMatches.length === 0
+          ? '<div class="win-empty"><i class="fas fa-search"></i><p>Không có phiếu phù hợp với bộ lọc hiện tại.</p></div>'
+          : visibleMatches
+              .map((match) => {
+                const entry = match.entry;
+                const rate = Number(match.state.rate);
+                const payout = match.hitSum * rate;
+                const sessionIcon =
+                  entry.session === "Sáng" ? "fa-sun" : "fa-moon";
+                const sourceBadge = isDirectEntry(entry)
+                  ? entry.seller
+                    ? `<span class="ledger-entry-seller"><i class="fas fa-store"></i> ${escapeHtml(
+                        entry.seller
+                      )}</span>`
+                    : ""
+                  : '<span class="ledger-entry-source"><i class="fas fa-sitemap"></i> Cấp dưới</span>';
+                return `
+                  <article class="win-item${
+                    match.state.paid ? " win-item-paid" : ""
+                  }" data-entry-id="${escapeHtml(
+                    String(entry.id)
+                  )}" data-state-key="${escapeHtml(match.key)}">
+                    <div class="win-item-header">
+                      <div class="win-item-meta">
+                        <span class="ledger-entry-date">${escapeHtml(
+                          entry.date
+                        )}</span>
+                        <span class="ledger-entry-session"><i class="fas ${sessionIcon}"></i> ${escapeHtml(
+                          entry.session
+                        )}</span>
+                        <span class="ledger-entry-person">${escapeHtml(
+                          match.recipient.name
+                        )}</span>
+                        ${sourceBadge}
+                      </div>
+                      <div class="win-item-amounts">
+                        <div class="win-item-amount">+${match.hitSum.toLocaleString(
+                          "vi-VN"
+                        )} đ</div>
+                        <div class="win-item-payout">×${rate} = ${payout.toLocaleString(
+                          "vi-VN"
+                        )} đ</div>
+                      </div>
+                    </div>
+                    <div class="win-item-content">${formatWinningContent(
+                      entry,
+                      confirmedDraw.animalIndex
+                    )}</div>
+                    <div class="win-item-footer">
+                      <label class="payout-rate-control">Hệ số
+                        <select onchange="updatePayoutRate('${escapeHtml(
+                          String(entry.id)
+                        )}', this.value)" ${
+                          match.state.paid ? "disabled" : ""
+                        }>
+                          ${[27, 28, 29, 30]
+                            .map(
+                              (option) =>
+                                `<option value="${option}" ${
+                                  option === rate ? "selected" : ""
+                                }>${option}</option>`
+                            )
+                            .join("")}
+                        </select>
+                      </label>
+                      <button class="win-paid-btn${
+                        match.state.paid ? " is-paid" : ""
+                      }" onclick="togglePaidStatus('${escapeHtml(
+                        String(entry.id)
+                      )}')"><i class="${
+                        match.state.paid
+                          ? "fas fa-check-circle"
+                          : "far fa-circle"
+                      }"></i> ${
+                        match.state.paid ? "Đã chung" : "Chưa chung"
+                      }</button>
+                      <button class="win-copy-btn" onclick="copyEntryText('${escapeHtml(
+                        String(entry.id)
+                      )}')"><i class="fas fa-copy"></i> Copy</button>
+                      <span class="win-item-total-label">Tổng phiếu:</span>
+                      <span class="win-item-total-value">${(
+                        Number(entry.total) || 0
+                      ).toLocaleString("vi-VN")} đ</span>
+                    </div>
+                  </article>`;
+              })
+              .join("")
+      }
+    </div>`;
+  card.style.display = "block";
+  schedulePayoutLookupHeight();
+  if (showToast) {
+    showNotification(
+      `Tìm thấy ${allMatches.length} phiếu chứa ${animal.type}!`
+    );
+  }
+}
+
+function schedulePayoutLookupHeight() {
+  requestAnimationFrame(() => {
+    const list = document.querySelector("#winResultBody .win-list");
+    if (!list) return;
+    const items = Array.from(list.querySelectorAll(".win-item"));
+    list.classList.toggle("is-scrollable", items.length > 3);
+    if (items.length <= 3) {
+      list.style.maxHeight = "";
+      return;
+    }
+    const gap = Number.parseFloat(getComputedStyle(list).gap) || 10;
+    const height =
+      items.slice(0, 3).reduce((sum, item) => sum + item.offsetHeight, 0) +
+      gap * 2;
+    list.style.maxHeight = `${Math.ceil(height)}px`;
+  });
+}
+
+function updatePayoutRate(entryId, value) {
+  const rate = Number(value);
+  if (![27, 28, 29, 30].includes(rate)) return;
+  const confirmedDraw = getConfirmedDraw();
+  if (!confirmedDraw) return;
+  const entry = findEntryById(entryId);
+  if (!entry) return;
+  const hitSum = (entry.entries || [])
+    .filter(
+      (item) =>
+        animalNameToIndex[item.animal] === confirmedDraw.animalIndex
+    )
+    .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const { state } = ensurePayoutState(
+    confirmedDraw,
+    entry,
+    confirmedDraw.animalIndex,
+    hitSum
+  );
+  if (state.paid) {
+    showNotification(
+      "Hãy bỏ đánh dấu đã chung trước khi đổi hệ số!",
+      "error"
+    );
+    filterWinningEntries(false);
+    return;
+  }
+  state.rate = rate;
+  state.rateMode = "manual";
+  saveDataToLocalStorage();
+  filterWinningEntries(false);
+  updateFinanceDashboard();
+}
+
+function togglePaidStatus(entryId) {
+  const confirmedDraw = getConfirmedDraw();
+  const entry = findEntryById(entryId);
+  if (!confirmedDraw || !entry) return;
+  const hitSum = (entry.entries || [])
+    .filter(
+      (item) =>
+        animalNameToIndex[item.animal] === confirmedDraw.animalIndex
+    )
+    .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const { state } = ensurePayoutState(
+    confirmedDraw,
+    entry,
+    confirmedDraw.animalIndex,
+    hitSum
+  );
+
+  state.paid = !state.paid;
+  state.paidAt = state.paid ? new Date().toISOString() : null;
+  state.snapshot = state.paid
+    ? buildPayoutSnapshot(
+        entry,
+        confirmedDraw,
+        confirmedDraw.animalIndex,
+        hitSum,
+        Number(state.rate)
+      )
+    : null;
+  saveDataToLocalStorage();
+  filterWinningEntries(false);
+  renderPayoutHistory();
+  showNotification(
+    state.paid ? "Đã đánh dấu đã chung!" : "Đã chuyển về chưa chung!"
+  );
+}
+
+function updateWinPaidSummary() {
+  filterWinningEntries(false);
+}
+
+function renderPayoutHistory() {
+  const container = document.getElementById("payoutHistoryList");
+  if (!container) return;
+  renderPayoutHistoryDrawInfo();
+  const recipientFilter = removeVietnameseDiacritics(
+    document.getElementById("payoutHistoryRecipient")?.value || ""
+  ).toLowerCase();
+
+  const records = Object.values(payoutStates)
+    .filter((state) => state.paid && state.snapshot)
+    .map((state) => ({ ...state.snapshot, paidAt: state.paidAt }))
+    .filter(
+      (record) =>
+        record.date >= activeViewDateFrom &&
+        record.date <= activeViewDateTo &&
+        (!activeViewSession || record.session === activeViewSession) &&
+        (!recipientFilter ||
+          removeVietnameseDiacritics(record.recipientName)
+            .toLowerCase()
+            .includes(recipientFilter))
+    )
+    .sort((a, b) => String(b.paidAt).localeCompare(String(a.paidAt)));
+
+  if (records.length === 0) {
+    container.innerHTML =
+      '<div class="empty-state">Chưa có khoản trả thưởng phù hợp với bộ lọc</div>';
+    return;
+  }
+
+  const total = records.reduce(
+    (sum, record) => sum + (Number(record.payoutAmount) || 0),
+    0
+  );
+  container.innerHTML = `
+    <div class="payout-history-summary">Đã chung <strong>${
+      records.length
+    }</strong> phiếu · Tổng <strong>${total.toLocaleString(
+      "vi-VN"
+    )} đ</strong></div>
+    <div class="payout-history-table-wrap">
+      <table class="payout-history-table">
+        <thead><tr><th>Ngày / buổi</th><th>Con xổ</th><th>Người nhận</th><th>Tiền đánh</th><th>Hệ số</th><th>Tiền đã chung</th><th>Thời gian chung</th></tr></thead>
+        <tbody>
+          ${records
+            .map(
+              (record) => `
+                <tr>
+                  <td>${formatDateForDisplay(record.date)}<small>${escapeHtml(
+                    record.session
+                  )}</small></td>
+                  <td>${escapeHtml(
+                    `${record.animalId} - ${record.animalType}`
+                  )}</td>
+                  <td><strong>${escapeHtml(
+                    record.recipientName
+                  )}</strong><small>${escapeHtml(
+                    record.recipientType
+                  )}${record.seller ? ` · ${escapeHtml(record.seller)}` : ""}</small></td>
+                  <td>${Number(record.hitAmount).toLocaleString("vi-VN")} đ</td>
+                  <td>×${record.rate}</td>
+                  <td class="payout-history-money">${Number(
+                    record.payoutAmount
+                  ).toLocaleString("vi-VN")} đ</td>
+                  <td>${new Date(record.paidAt).toLocaleString("vi-VN")}</td>
+                </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderPayoutHistoryDrawInfo() {
+  const container = document.getElementById("payoutHistoryDrawInfo");
+  if (!container) return;
+  const date = activeViewDateTo;
+  const sessions = activeViewSession
+    ? [activeViewSession]
+    : ["Sáng", "Chiều"];
+
+  container.innerHTML = sessions
+    .map((session) => {
+      const result = drawResults[getDrawKey(date, session)];
+      const animalIndex = result
+        ? animals.findIndex((animal) => animal.id === String(result.animalId))
+        : -1;
+      const icon = session === "Sáng" ? "fa-sun" : "fa-moon";
+      if (animalIndex === -1) {
+        return `<span class="payout-draw-chip is-empty"><i class="fas ${icon}"></i><strong>${session}</strong>: chưa xác nhận</span>`;
+      }
+      return `<span class="payout-draw-chip"><i class="fas ${icon}"></i><strong>${session}</strong>: ${escapeHtml(
+        getAnimalSearchLabel(animalIndex)
+      )}</span>`;
+    })
+    .join("");
+}
+
 // Thêm sự kiện lắng nghe thay đổi nội dung để tính tổng
 document.getElementById("ledgerContent").addEventListener("input", function () {
   const parsed = parseContentDetailed(this.value);
@@ -1215,8 +2052,7 @@ const PAGE_META = {
   home: ["Trang chủ", "Hệ thống / Trang chủ"],
   "ledger-entry": ["Sổ ghi", "Quản lý sổ ghi / Sổ ghi"],
   "ledger-history": ["Lịch sử ghi sổ", "Quản lý sổ ghi / Lịch sử ghi sổ"],
-  "payout-lookup": ["Tra cứu con xổ", "Quản lý trả thưởng / Tra cứu con xổ"],
-  "payout-pending": ["Phiếu cần trả", "Quản lý trả thưởng / Phiếu cần trả"],
+  "payout-lookup": ["Tra cứu & chung thưởng", "Quản lý trả thưởng / Tra cứu & chung thưởng"],
   "payout-history": ["Lịch sử trả thưởng", "Quản lý trả thưởng / Lịch sử trả thưởng"],
   "finance-overview": ["Tổng quan doanh thu", "Doanh thu & công nợ / Tổng quan"],
   "finance-debt": ["Công nợ khách hàng", "Doanh thu & công nợ / Công nợ khách hàng"],
@@ -1237,8 +2073,31 @@ function getCurrentRoute() {
 
 function showRoute(route) {
   const validRoute = PAGE_META[route] ? route : "home";
+  const rangeDateRoutes = [
+    "finance-overview",
+    "finance-debt",
+    "finance-source",
+  ];
+  const usesSingleDate =
+    validRoute !== "home" && !rangeDateRoutes.includes(validRoute);
   document.body.classList.toggle("home-route", validRoute === "home");
   document.body.classList.toggle("ledger-route", validRoute === "ledger-entry");
+  document.body.classList.toggle(
+    "single-date-route",
+    usesSingleDate
+  );
+  document.body.classList.toggle(
+    "finance-range-route",
+    rangeDateRoutes.includes(validRoute)
+  );
+  document.body.classList.toggle(
+    "payout-lookup-route",
+    validRoute === "payout-lookup"
+  );
+  document.body.classList.toggle(
+    "payout-history-route",
+    validRoute === "payout-history"
+  );
   document.querySelectorAll("[data-route-page]").forEach((page) => {
     page.classList.toggle("active", page.dataset.routePage === validRoute);
   });
@@ -1262,7 +2121,39 @@ function showRoute(route) {
 
   document.body.classList.remove("sidebar-open");
   window.scrollTo({ top: 0, behavior: "instant" });
+  const singleDateWasReset =
+    usesSingleDate &&
+    activeViewDateFrom !== activeViewDateTo;
+  if (singleDateWasReset) {
+    activeViewDateFrom = activeViewDateTo;
+    activeViewDate = activeViewDateTo;
+  }
+  if (usesSingleDate) {
+    syncViewControls();
+    if (singleDateWasReset) refreshAllViews();
+  } else {
+    syncViewControls();
+  }
   if (validRoute === "ledger-history") scheduleLedgerHistoryHeight();
+  if (validRoute === "payout-lookup") {
+    if (activeViewDateFrom !== activeViewDateTo) {
+      activeViewDateFrom = activeViewDateTo;
+      activeViewDate = activeViewDateTo;
+    }
+    if (!["Sáng", "Chiều"].includes(activeViewSession)) {
+      activeViewSession = "Sáng";
+    }
+    syncViewControls();
+    syncPayoutLookupForActiveView();
+  }
+  if (validRoute === "payout-history") {
+    if (activeViewDateFrom !== activeViewDateTo) {
+      activeViewDateFrom = activeViewDateTo;
+      activeViewDate = activeViewDateTo;
+    }
+    syncViewControls();
+    renderPayoutHistory();
+  }
 }
 
 function navigateToRoute(route) {
@@ -1318,11 +2209,28 @@ function setNavGroupCollapsed(group, collapsed, persist = true) {
 function initNavGroups() {
   const collapsedGroups = getCollapsedNavGroups();
   document.querySelectorAll(".erp-nav-group").forEach((group) => {
+    let closeTimer = null;
     setNavGroupCollapsed(
       group,
       collapsedGroups.has(group.dataset.navGroup),
       false
     );
+    group.addEventListener("mouseenter", () => {
+      if (closeTimer) clearTimeout(closeTimer);
+      group.classList.add("flyout-open");
+    });
+    group.addEventListener("mouseleave", () => {
+      if (closeTimer) clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => {
+        group.classList.remove("flyout-open");
+      }, 220);
+    });
+    group.querySelectorAll("[data-route-link]").forEach((link) => {
+      link.addEventListener("click", () => {
+        if (closeTimer) clearTimeout(closeTimer);
+        group.classList.remove("flyout-open");
+      });
+    });
   });
   document.querySelectorAll("[data-nav-group-toggle]").forEach((toggle) => {
     toggle.addEventListener("click", () => {
@@ -1337,6 +2245,26 @@ function initTabs() {
     document.body.classList.add("sidebar-collapsed");
   }
   initNavGroups();
+  const homeLink = document.querySelector(
+    '.erp-nav-link[data-route-link="home"]'
+  );
+  if (homeLink) {
+    let homeCloseTimer = null;
+    homeLink.addEventListener("mouseenter", () => {
+      if (homeCloseTimer) clearTimeout(homeCloseTimer);
+      homeLink.classList.add("flyout-open");
+    });
+    homeLink.addEventListener("mouseleave", () => {
+      if (homeCloseTimer) clearTimeout(homeCloseTimer);
+      homeCloseTimer = setTimeout(() => {
+        homeLink.classList.remove("flyout-open");
+      }, 220);
+    });
+    homeLink.addEventListener("click", () => {
+      if (homeCloseTimer) clearTimeout(homeCloseTimer);
+      homeLink.classList.remove("flyout-open");
+    });
+  }
   document.querySelectorAll("[data-route-link]").forEach((button) => {
     button.addEventListener("click", () => {
       navigateToRoute(button.dataset.routeLink);
@@ -1353,9 +2281,11 @@ function syncViewControls() {
   if (viewDateTo) viewDateTo.value = activeViewDateTo;
   const dateRangeLabel = document.getElementById("dateRangeLabel");
   if (dateRangeLabel) {
-    dateRangeLabel.textContent = `${formatDateForDisplay(
-      activeViewDateFrom
-    )} - ${formatDateForDisplay(activeViewDateTo)}`;
+    dateRangeLabel.textContent = isSingleDateRoute()
+      ? formatDateForDisplay(activeViewDateTo)
+      : `${formatDateForDisplay(activeViewDateFrom)} - ${formatDateForDisplay(
+          activeViewDateTo
+        )}`;
   }
   document.querySelectorAll(".view-session-btn").forEach((button) => {
     button.classList.toggle("active", button.dataset.session === activeViewSession);
@@ -1383,6 +2313,7 @@ function syncViewControls() {
     );
     if (entrySession) entrySession.checked = true;
   }
+  renderDateRangeCalendar();
 }
 
 function setActiveView(date, session) {
@@ -1411,6 +2342,145 @@ function closeDateRangePicker() {
   if (toggle) toggle.setAttribute("aria-expanded", "false");
 }
 
+function parseCalendarDate(value) {
+  const [year, month, day] = String(value || "")
+    .split("-")
+    .map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function isSingleDateRoute() {
+  return document.body.classList.contains("single-date-route");
+}
+
+function renderCalendarMonth(year, month) {
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+  const monthTitle = `Tháng ${month + 1} ${year}`;
+  const cells = [];
+
+  for (let index = 0; index < mondayOffset; index += 1) {
+    cells.push('<span class="calendar-day is-blank"></span>');
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const value = formatDateForInput(new Date(year, month, day));
+    const isStart = value === activeViewDateFrom;
+    const isEnd = value === activeViewDateTo;
+    const isRange =
+      value >= activeViewDateFrom && value <= activeViewDateTo;
+    const classes = [
+      "calendar-day",
+      isRange ? "is-in-range" : "",
+      isStart ? "is-start" : "",
+      isEnd ? "is-end" : "",
+      value === getCurrentDate() ? "is-today" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    cells.push(
+      `<button type="button" class="${classes}" data-calendar-date="${value}">${day}</button>`
+    );
+  }
+
+  return `
+    <section class="calendar-month">
+      <h3>${monthTitle}</h3>
+      <div class="calendar-weekdays">
+        ${["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+          .map((day) => `<span>${day}</span>`)
+          .join("")}
+      </div>
+      <div class="calendar-days">${cells.join("")}</div>
+    </section>`;
+}
+
+function renderDateRangeCalendar() {
+  const calendar = document.getElementById("dateRangeCalendar");
+  const monthSelect = document.getElementById("calendarMonth");
+  const yearSelect = document.getElementById("calendarYear");
+  if (!calendar || !monthSelect || !yearSelect) return;
+
+  const cursorYear = calendarCursor.getFullYear();
+  const cursorMonth = calendarCursor.getMonth();
+  monthSelect.innerHTML = Array.from(
+    { length: 12 },
+    (_, index) =>
+      `<option value="${index}" ${
+        index === cursorMonth ? "selected" : ""
+      }>Tháng ${index + 1}</option>`
+  ).join("");
+  yearSelect.innerHTML = Array.from(
+    { length: 11 },
+    (_, index) => cursorYear - 5 + index
+  )
+    .map(
+      (year) =>
+        `<option value="${year}" ${
+          year === cursorYear ? "selected" : ""
+        }>${year}</option>`
+    )
+    .join("");
+
+  const nextMonth = new Date(cursorYear, cursorMonth + 1, 1);
+  calendar.innerHTML =
+    renderCalendarMonth(cursorYear, cursorMonth) +
+    renderCalendarMonth(nextMonth.getFullYear(), nextMonth.getMonth());
+  calendar.querySelectorAll("[data-calendar-date]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectCalendarDate(button.dataset.calendarDate);
+    });
+  });
+}
+
+function shiftCalendarMonth(delta) {
+  calendarCursor = new Date(
+    calendarCursor.getFullYear(),
+    calendarCursor.getMonth() + delta,
+    1
+  );
+  renderDateRangeCalendar();
+}
+
+function updateCalendarCursor() {
+  const month = Number(document.getElementById("calendarMonth")?.value);
+  const year = Number(document.getElementById("calendarYear")?.value);
+  if (!Number.isInteger(month) || !Number.isInteger(year)) return;
+  calendarCursor = new Date(year, month, 1);
+  renderDateRangeCalendar();
+}
+
+function selectCalendarDate(value) {
+  if (!value) return;
+  if (isSingleDateRoute()) {
+    activeViewDateFrom = value;
+    activeViewDateTo = value;
+    activeViewDate = value;
+    calendarAwaitingEnd = false;
+    syncViewControls();
+    refreshAllViews();
+    closeDateRangePicker();
+    return;
+  }
+
+  if (!calendarAwaitingEnd) {
+    activeViewDateFrom = value;
+    activeViewDateTo = value;
+    activeViewDate = value;
+    calendarAwaitingEnd = true;
+  } else {
+    const rangeStart = activeViewDateFrom;
+    activeViewDateFrom = value < rangeStart ? value : rangeStart;
+    activeViewDateTo = value < rangeStart ? rangeStart : value;
+    activeViewDate = activeViewDateTo;
+    calendarAwaitingEnd = false;
+  }
+  syncViewControls();
+  refreshAllViews();
+  if (!calendarAwaitingEnd) closeDateRangePicker();
+}
+
 function initDateRangePicker() {
   const picker = document.getElementById("dateRangePicker");
   const popover = document.getElementById("dateRangePopover");
@@ -1421,9 +2491,25 @@ function initDateRangePicker() {
     const willOpen = !popover.classList.contains("show");
     popover.classList.toggle("show", willOpen);
     toggle.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) {
+      calendarCursor = parseCalendarDate(activeViewDateFrom);
+      calendarCursor.setDate(1);
+      calendarAwaitingEnd = false;
+      renderDateRangeCalendar();
+    }
   });
+  document
+    .getElementById("calendarMonth")
+    ?.addEventListener("change", updateCalendarCursor);
+  document
+    .getElementById("calendarYear")
+    ?.addEventListener("change", updateCalendarCursor);
   document.addEventListener("click", (event) => {
-    if (!picker.contains(event.target)) closeDateRangePicker();
+    const clickPath =
+      typeof event.composedPath === "function" ? event.composedPath() : [];
+    if (!clickPath.includes(picker) && !picker.contains(event.target)) {
+      closeDateRangePicker();
+    }
   });
 }
 
@@ -1457,6 +2543,8 @@ function initViewControls() {
       activeViewDateFrom = formatDateForInput(start);
       activeViewDateTo = formatDateForInput(end);
       activeViewDate = activeViewDateTo;
+      calendarCursor = new Date(start.getFullYear(), start.getMonth(), 1);
+      calendarAwaitingEnd = false;
       syncViewControls();
       refreshAllViews();
     });
@@ -1487,90 +2575,1039 @@ function setMoneyText(id, amount) {
   if (element) element.textContent = `${amount.toLocaleString("vi-VN")} đ`;
 }
 
+function normalizeCommissionRate(value, fallback = 0) {
+  const rate = Number(value);
+  if (!Number.isFinite(rate)) return fallback;
+  return Math.min(100, Math.max(0, Math.round(rate * 10) / 10));
+}
+
+function normalizePayoutRate(value, fallback = 28) {
+  const rate = Math.round(Number(value));
+  return [27, 28, 29, 30].includes(rate) ? rate : fallback;
+}
+
+function getFinanceSource(entry) {
+  if (!isDirectEntry(entry)) {
+    const sourceId = entry.sourceProfileId || entry.sourceProfileName || "unknown";
+    return {
+      key: `child:${sourceId}`,
+      name: entry.sourceProfileName || entry.person || "Cấp dưới",
+      defaultRole: "child",
+      imported: true,
+    };
+  }
+
+  const seller = String(entry.seller || "").trim();
+  if (entry.sellerRole === "self") {
+    return {
+      key: `self:${entry.sellerSourceId || localProfile.id}`,
+      name: seller || localProfile.name || "Bản thân",
+      defaultRole: "self",
+      imported: false,
+    };
+  }
+  if (entry.sellerRole === "child") {
+    return {
+      key: `seller:${entry.sellerSourceId || removeVietnameseDiacritics(seller).toLowerCase()}`,
+      name: seller || "Người bán khác",
+      defaultRole: "child",
+      imported: false,
+    };
+  }
+  const normalizedSeller = removeVietnameseDiacritics(seller).toLowerCase();
+  const normalizedProfile = removeVietnameseDiacritics(
+    localProfile.name || ""
+  ).toLowerCase();
+  const isOwner =
+    !seller || (normalizedProfile && normalizedSeller === normalizedProfile);
+
+  return isOwner
+    ? {
+        key: `self:${localProfile.id}`,
+        name: localProfile.name || "Bản thân",
+        defaultRole: "self",
+        imported: false,
+      }
+    : {
+        key: `seller:${normalizedSeller}`,
+        name: seller,
+        defaultRole: "child",
+        imported: false,
+      };
+}
+
+function getFinanceSourceConfig(source) {
+  const stored = financeSettings.sourceConfigs[source.key] || {};
+  const role = source.imported
+    ? "child"
+    : stored.role === "self" || stored.role === "child"
+      ? stored.role
+      : source.defaultRole;
+  const childRate =
+    role === "child"
+      ? Math.min(
+          normalizeCommissionRate(financeSettings.ownerRate, 20),
+          normalizeCommissionRate(
+            stored.childRate,
+            financeSettings.defaultChildRate
+          )
+        )
+      : 0;
+  return { role, childRate };
+}
+
+function getDefaultPayoutRateForEntry(entry) {
+  return normalizePayoutRate(financeSettings.defaultPayoutRate, 27);
+}
+
+function getEntryPayoutSpread(entry) {
+  const drawKey = getDrawKey(entry.date, entry.session);
+  const draw = drawResults[drawKey];
+  if (!draw) {
+    return {
+      hitAmount: 0,
+      incomingPayout: 0,
+      outgoingPayout: 0,
+      payoutMargin: 0,
+    };
+  }
+  const animalIndex = animals.findIndex(
+    (animal) => animal.id === String(draw.animalId)
+  );
+  if (animalIndex === -1) {
+    return {
+      hitAmount: 0,
+      incomingPayout: 0,
+      outgoingPayout: 0,
+      payoutMargin: 0,
+    };
+  }
+  const hitAmount = (entry.entries || [])
+    .filter((item) => animalNameToIndex[item.animal] === animalIndex)
+    .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  if (!hitAmount) {
+    return {
+      hitAmount: 0,
+      incomingPayout: 0,
+      outgoingPayout: 0,
+      payoutMargin: 0,
+    };
+  }
+
+  const state = payoutStates[getPayoutStateKey(drawKey, entry.id)];
+  const defaultOutgoingRate = getDefaultPayoutRateForEntry(entry);
+  const outgoingRate =
+    state &&
+    [27, 28, 29, 30].includes(Number(state.rate)) &&
+    (state.rateMode !== "default" || state.paid)
+      ? Number(state.rate)
+      : defaultOutgoingRate;
+  const incomingRate = normalizePayoutRate(
+    financeSettings.ownerPayoutRate,
+    28
+  );
+  const incomingPayout = hitAmount * incomingRate;
+  const outgoingPayout = hitAmount * outgoingRate;
+  return {
+    hitAmount,
+    incomingRate,
+    outgoingRate,
+    incomingPayout,
+    outgoingPayout,
+    payoutMargin: incomingPayout - outgoingPayout,
+  };
+}
+
+function getFinanceBreakdown(entries = getVisibleEntries()) {
+  const ownerRate = normalizeCommissionRate(financeSettings.ownerRate, 20);
+  const sources = new Map();
+
+  entries.forEach((entry) => {
+    const source = getFinanceSource(entry);
+    const config = getFinanceSourceConfig(source);
+    const current = sources.get(source.key) || {
+      ...source,
+      ...config,
+      count: 0,
+      total: 0,
+      hitAmount: 0,
+      incomingPayout: 0,
+      outgoingPayout: 0,
+      payoutMargin: 0,
+    };
+    const payout = getEntryPayoutSpread(entry);
+    current.count += 1;
+    current.total += Number(entry.total) || 0;
+    current.hitAmount += payout.hitAmount;
+    current.incomingPayout += payout.incomingPayout;
+    current.outgoingPayout += payout.outgoingPayout;
+    current.payoutMargin += payout.payoutMargin;
+    sources.set(source.key, current);
+  });
+
+  const rows = Array.from(sources.values()).map((source) => {
+    const grossCommission = Math.round((source.total * ownerRate) / 100);
+    const childCommission =
+      source.role === "child"
+        ? Math.round((source.total * source.childRate) / 100)
+        : 0;
+    const commissionIncome = grossCommission - childCommission;
+    return {
+      ...source,
+      grossCommission,
+      childCommission,
+      commissionIncome,
+      netIncome: commissionIncome + source.payoutMargin,
+      upstreamPayable: source.total - grossCommission,
+    };
+  });
+
+  return {
+    ownerRate,
+    rows,
+    total: rows.reduce((sum, row) => sum + row.total, 0),
+    grossCommission: rows.reduce(
+      (sum, row) => sum + row.grossCommission,
+      0
+    ),
+    childCommission: rows.reduce(
+      (sum, row) => sum + row.childCommission,
+      0
+    ),
+    commissionIncome: rows.reduce(
+      (sum, row) => sum + row.commissionIncome,
+      0
+    ),
+    hitAmount: rows.reduce((sum, row) => sum + row.hitAmount, 0),
+    incomingPayout: rows.reduce(
+      (sum, row) => sum + row.incomingPayout,
+      0
+    ),
+    outgoingPayout: rows.reduce(
+      (sum, row) => sum + row.outgoingPayout,
+      0
+    ),
+    payoutMargin: rows.reduce((sum, row) => sum + row.payoutMargin, 0),
+    netIncome: rows.reduce((sum, row) => sum + row.netIncome, 0),
+    upstreamPayable: rows.reduce(
+      (sum, row) => sum + row.upstreamPayable,
+      0
+    ),
+  };
+}
+
+function syncFinanceSettingsForm() {
+  const ownerRate = document.getElementById("financeOwnerRate");
+  const childRate = document.getElementById("financeDefaultChildRate");
+  const ownerPayoutRate = document.getElementById("financeOwnerPayoutRate");
+  const payoutRate = document.getElementById("financeDefaultPayoutRate");
+  if (ownerRate) ownerRate.value = financeSettings.ownerRate;
+  if (childRate) childRate.value = financeSettings.defaultChildRate;
+  if (ownerPayoutRate) {
+    ownerPayoutRate.value = financeSettings.ownerPayoutRate;
+  }
+  if (payoutRate) {
+    payoutRate.value = financeSettings.defaultPayoutRate;
+  }
+}
+
+function saveFinanceSettingsFromForm() {
+  const ownerRate = normalizeCommissionRate(
+    document.getElementById("financeOwnerRate")?.value,
+    financeSettings.ownerRate
+  );
+  const childRate = normalizeCommissionRate(
+    document.getElementById("financeDefaultChildRate")?.value,
+    financeSettings.defaultChildRate
+  );
+  const ownerPayoutRate = normalizePayoutRate(
+    document.getElementById("financeOwnerPayoutRate")?.value,
+    financeSettings.ownerPayoutRate
+  );
+  const payoutRate = normalizePayoutRate(
+    document.getElementById("financeDefaultPayoutRate")?.value,
+    financeSettings.defaultPayoutRate
+  );
+  if (childRate > ownerRate) {
+    showNotification(
+      "Tỷ lệ trả cấp dưới không được lớn hơn tỷ lệ bạn được hưởng!",
+      "error"
+    );
+    syncFinanceSettingsForm();
+    return;
+  }
+  if (payoutRate > ownerPayoutRate) {
+    showNotification(
+      "Hệ số trả khách/cấp dưới không được lớn hơn hệ số bạn nhận từ cấp trên!",
+      "error"
+    );
+    syncFinanceSettingsForm();
+    return;
+  }
+  financeSettings.ownerRate = ownerRate;
+  financeSettings.defaultChildRate = childRate;
+  financeSettings.ownerPayoutRate = ownerPayoutRate;
+  financeSettings.defaultPayoutRate = payoutRate;
+  saveDataToLocalStorage();
+  refreshAllViews();
+  showNotification("Đã lưu cấu hình hệ số và hoa hồng!");
+}
+
+function updateFinanceSourceConfig(encodedKey, field, value) {
+  const key = decodeURIComponent(encodedKey);
+  const source = getFinanceBreakdown().rows.find((row) => row.key === key);
+  if (!source) return;
+  const current = financeSettings.sourceConfigs[key] || {
+    role: source.role,
+    childRate: source.childRate,
+  };
+
+  if (field === "role" && !source.imported) {
+    current.role = value === "self" ? "self" : "child";
+  }
+  if (field === "childRate") {
+    const childRate = normalizeCommissionRate(
+      value,
+      financeSettings.defaultChildRate
+    );
+    if (childRate > financeSettings.ownerRate) {
+      showNotification(
+        "Tỷ lệ trả nguồn không được lớn hơn tỷ lệ bạn được hưởng!",
+        "error"
+      );
+      updateFinanceDashboard();
+      return;
+    }
+    current.childRate = childRate;
+  }
+  financeSettings.sourceConfigs[key] = current;
+  saveDataToLocalStorage();
+  updateFinanceDashboard();
+}
+
+function getDebtPaymentsForEntry(entryId, cutoffDate = "") {
+  return debtPayments.filter(
+    (payment) =>
+      String(payment.entryId) === String(entryId) &&
+      !payment.reversedAt &&
+      (!cutoffDate || payment.paidDate <= cutoffDate)
+  );
+}
+
+function getDebtPaidAmount(entryId, cutoffDate = "") {
+  return getDebtPaymentsForEntry(entryId, cutoffDate).reduce(
+    (sum, payment) => sum + (Number(payment.amount) || 0),
+    0
+  );
+}
+
+function getDebtSnapshot(entry, cutoffDate = "") {
+  const total = Number(entry.total) || 0;
+  const paid = Math.min(total, getDebtPaidAmount(entry.id, cutoffDate));
+  const remaining = Math.max(0, total - paid);
+  const status =
+    remaining === 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
+  return { total, paid, remaining, status };
+}
+
+function getDebtStatusMeta(status) {
+  const map = {
+    unpaid: { label: "Chưa trả", icon: "fa-clock", className: "unpaid" },
+    partial: {
+      label: "Đã trả một phần",
+      icon: "fa-circle-half-stroke",
+      className: "partial",
+    },
+    paid: {
+      label: "Đã trả đủ",
+      icon: "fa-circle-check",
+      className: "paid",
+    },
+  };
+  return map[status] || map.unpaid;
+}
+
+function getDebtEntriesAsOf(cutoffDate = activeViewDateTo) {
+  return ledgerData.filter(
+    (entry) =>
+      isDirectEntry(entry) &&
+      entry.paymentType === "debt" &&
+      entry.date <= cutoffDate &&
+      (!activeViewSession || entry.session === activeViewSession)
+  );
+}
+
+function renderDebtList(entries) {
+  const container = document.getElementById("debtList");
+  if (!container) return;
+  const search = removeVietnameseDiacritics(
+    document.getElementById("debtSearchInput")?.value || ""
+  ).toLowerCase();
+  const statusFilter =
+    document.getElementById("debtStatusFilter")?.value || "outstanding";
+  const rows = entries
+    .map((entry) => ({ entry, snapshot: getDebtSnapshot(entry, activeViewDateTo) }))
+    .filter(({ entry, snapshot }) => {
+      const matchesSearch =
+        !search ||
+        removeVietnameseDiacritics(`${entry.person} ${entry.seller}`)
+          .toLowerCase()
+          .includes(search);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "outstanding"
+          ? snapshot.remaining > 0
+          : snapshot.status === statusFilter);
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => {
+      if (a.snapshot.remaining !== b.snapshot.remaining) {
+        return b.snapshot.remaining - a.snapshot.remaining;
+      }
+      return String(b.entry.date).localeCompare(String(a.entry.date));
+    });
+
+  const allSnapshots = entries.map((entry) =>
+    getDebtSnapshot(entry, activeViewDateTo)
+  );
+  const totalOriginal = allSnapshots.reduce(
+    (sum, snapshot) => sum + snapshot.total,
+    0
+  );
+  const totalPaid = allSnapshots.reduce(
+    (sum, snapshot) => sum + snapshot.paid,
+    0
+  );
+  const totalRemaining = allSnapshots.reduce(
+    (sum, snapshot) => sum + snapshot.remaining,
+    0
+  );
+
+  container.innerHTML = `
+    <div class="debt-overview-strip">
+      <span>Tổng phiếu nợ <strong>${totalOriginal.toLocaleString("vi-VN")} đ</strong></span>
+      <span>Đã thu <strong>${totalPaid.toLocaleString("vi-VN")} đ</strong></span>
+      <span>Còn nợ đến ${formatDateForDisplay(
+        activeViewDateTo
+      )} <strong>${totalRemaining.toLocaleString("vi-VN")} đ</strong></span>
+    </div>
+    ${
+      rows.length === 0
+        ? '<div class="empty-state">Không có công nợ phù hợp với điều kiện đang xem</div>'
+        : `<div class="debt-table-wrap">
+            <table class="debt-table debt-management-table">
+              <colgroup>
+                <col class="debt-col-person" />
+                <col class="debt-col-date" />
+                <col class="debt-col-money" />
+                <col class="debt-col-money" />
+                <col class="debt-col-money" />
+                <col class="debt-col-status" />
+                <col class="debt-col-actions" />
+              </colgroup>
+              <thead><tr><th>Khách / người bán</th><th>Ngày ghi</th><th class="table-number-head">Tổng phiếu</th><th class="table-number-head">Đã trả</th><th class="table-number-head">Còn nợ</th><th class="table-center-head">Trạng thái</th><th class="table-center-head">Thao tác</th></tr></thead>
+              <tbody>
+                ${rows
+                  .map(({ entry, snapshot }) => {
+                    const status = getDebtStatusMeta(snapshot.status);
+                    return `<tr>
+                      <td class="table-primary-cell"><strong>${escapeHtml(
+                        entry.person || "Không có tên"
+                      )}</strong><small>${escapeHtml(
+                        entry.seller || localProfile.name || "Bản thân"
+                      )}</small></td>
+                      <td class="table-date-cell">${formatDateForDisplay(
+                        entry.date
+                      )}<small>${escapeHtml(entry.session)}</small></td>
+                      <td class="finance-money">${snapshot.total.toLocaleString(
+                        "vi-VN"
+                      )} đ</td>
+                      <td class="finance-money">${snapshot.paid.toLocaleString(
+                        "vi-VN"
+                      )} đ</td>
+                      <td class="finance-money debt-remaining">${snapshot.remaining.toLocaleString(
+                        "vi-VN"
+                      )} đ</td>
+                      <td class="table-status-cell"><span class="debt-status debt-status-${
+                        status.className
+                      }"><i class="fas ${status.icon}"></i> ${
+                        status.label
+                      }</span></td>
+                      <td class="table-actions-cell"><div class="debt-actions">
+                        <button type="button" class="debt-pay-btn" onclick="openDebtPaymentModal('${escapeHtml(
+                          String(entry.id)
+                        )}')" ${
+                          snapshot.remaining === 0 ? "disabled" : ""
+                        }><i class="fas fa-hand-holding-dollar"></i> Thu nợ</button>
+                        <button type="button" class="debt-history-btn" onclick="openDebtPaymentModal('${escapeHtml(
+                          String(entry.id)
+                        )}', true)"><i class="fas fa-clock-rotate-left"></i> Lịch sử</button>
+                      </div></td>
+                    </tr>`;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>`
+    }`;
+}
+
+function renderDebtPaymentModal(entry) {
+  const summary = document.getElementById("debtPaymentSummary");
+  const history = document.getElementById("debtPaymentHistoryList");
+  const saveButton = document.getElementById("saveDebtPaymentBtn");
+  const paymentForm = document.getElementById("debtPaymentForm");
+  if (!summary || !history || !saveButton || !paymentForm) return;
+  const snapshot = getDebtSnapshot(entry);
+  const status = getDebtStatusMeta(snapshot.status);
+  summary.innerHTML = `
+    <div><span>Khách</span><strong>${escapeHtml(
+      entry.person || "Không có tên"
+    )}</strong></div>
+    <div><span>Phiếu</span><strong>${formatDateForDisplay(
+      entry.date
+    )} · ${escapeHtml(entry.session)}</strong></div>
+    <div><span>Tổng phiếu</span><strong>${snapshot.total.toLocaleString(
+      "vi-VN"
+    )} đ</strong></div>
+    <div><span>Đã trả</span><strong>${snapshot.paid.toLocaleString(
+      "vi-VN"
+    )} đ</strong></div>
+    <div><span>Còn nợ</span><strong class="debt-modal-remaining">${snapshot.remaining.toLocaleString(
+      "vi-VN"
+    )} đ</strong></div>
+    <div><span>Trạng thái</span><strong>${status.label}</strong></div>`;
+
+  const payments = debtPayments
+    .filter((payment) => String(payment.entryId) === String(entry.id))
+    .sort((a, b) =>
+      `${b.paidDate}|${b.createdAt}`.localeCompare(
+        `${a.paidDate}|${a.createdAt}`
+      )
+    );
+  history.innerHTML =
+    payments.length === 0
+      ? '<div class="empty-state debt-history-empty">Chưa có lần thu nợ nào</div>'
+      : payments
+          .map((payment) => {
+            const method = getPaymentMeta(payment.method);
+            return `<div class="debt-payment-history-item${
+              payment.reversedAt ? " is-reversed" : ""
+            }">
+              <span class="debt-payment-method"><i class="fas ${
+                method.icon
+              }"></i></span>
+              <div><strong>${Number(payment.amount).toLocaleString(
+                "vi-VN"
+              )} đ · ${method.label}</strong><small>${formatDateForDisplay(
+                payment.paidDate
+              )}${payment.note ? ` · ${escapeHtml(payment.note)}` : ""}</small></div>
+              ${
+                payment.reversedAt
+                  ? '<span class="debt-reversed-label">Đã hủy</span>'
+                  : `<button type="button" onclick="reverseDebtPayment('${escapeHtml(
+                      String(payment.id)
+                    )}')"><i class="fas fa-rotate-left"></i> Hủy</button>`
+              }
+            </div>`;
+          })
+          .join("");
+  const isFullyPaid = snapshot.remaining === 0;
+  paymentForm.style.display = isFullyPaid ? "none" : "";
+  saveButton.style.display = isFullyPaid ? "none" : "inline-flex";
+  saveButton.disabled = isFullyPaid;
+}
+
+function openDebtPaymentModal(entryId, historyOnly = false) {
+  const entry = findEntryById(entryId);
+  if (!entry || entry.paymentType !== "debt") return;
+  const snapshot = getDebtSnapshot(entry);
+  document.getElementById("debtPaymentEntryId").value = entry.id;
+  document.getElementById("debtPaymentAmount").value =
+    snapshot.remaining || "";
+  document.getElementById("debtPaymentAmount").max = snapshot.remaining;
+  document.getElementById("debtPaymentDate").value = getCurrentDate();
+  document.getElementById("debtPaymentDate").min = entry.date;
+  document.getElementById("debtPaymentDate").max = getCurrentDate();
+  document.getElementById("debtPaymentMethod").value = "cash";
+  document.getElementById("debtPaymentNote").value = "";
+  renderDebtPaymentModal(entry);
+  document.getElementById("debtPaymentModal").classList.add("show");
+  if (historyOnly) {
+    document
+      .querySelector(".debt-payment-history")
+      ?.scrollIntoView({ block: "nearest" });
+  } else {
+    document.getElementById("debtPaymentAmount").focus();
+  }
+}
+
+function closeDebtPaymentModal() {
+  document.getElementById("debtPaymentModal").classList.remove("show");
+}
+
+function saveDebtPayment() {
+  const entry = findEntryById(
+    document.getElementById("debtPaymentEntryId").value
+  );
+  if (!entry || entry.paymentType !== "debt") return;
+  const amount = Number(document.getElementById("debtPaymentAmount").value);
+  const paidDate = document.getElementById("debtPaymentDate").value;
+  const method = document.getElementById("debtPaymentMethod").value;
+  const note = document.getElementById("debtPaymentNote").value.trim();
+  const snapshot = getDebtSnapshot(entry);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showNotification("Số tiền thu nợ phải lớn hơn 0!", "error");
+    return;
+  }
+  if (amount > snapshot.remaining) {
+    showNotification("Số tiền nhận không được lớn hơn số còn nợ!", "error");
+    return;
+  }
+  if (!paidDate || paidDate < entry.date || paidDate > getCurrentDate()) {
+    showNotification("Ngày nhận tiền không hợp lệ!", "error");
+    return;
+  }
+  if (!["cash", "bank_transfer"].includes(method)) return;
+
+  debtPayments.push({
+    id: createUuid(),
+    entryId: entry.id,
+    amount,
+    paidDate,
+    method,
+    note,
+    createdAt: new Date().toISOString(),
+    reversedAt: null,
+  });
+  saveDataToLocalStorage();
+  refreshAllViews();
+  renderDebtPaymentModal(entry);
+  document.getElementById("debtPaymentAmount").value =
+    getDebtSnapshot(entry).remaining || "";
+  showNotification(
+    getDebtSnapshot(entry).remaining === 0
+      ? "Đã thu đủ công nợ của phiếu!"
+      : "Đã ghi nhận khách trả một phần!"
+  );
+}
+
+function reverseDebtPayment(paymentId) {
+  const payment = debtPayments.find(
+    (item) => String(item.id) === String(paymentId)
+  );
+  if (!payment || payment.reversedAt) return;
+  if (!confirm("Hủy lần thu nợ này và cộng lại công nợ cho khách?")) return;
+  payment.reversedAt = new Date().toISOString();
+  saveDataToLocalStorage();
+  refreshAllViews();
+  const entry = findEntryById(payment.entryId);
+  if (entry) {
+    renderDebtPaymentModal(entry);
+    document.getElementById("debtPaymentAmount").value =
+      getDebtSnapshot(entry).remaining || "";
+  }
+  showNotification("Đã hủy giao dịch thu nợ!");
+}
+
+function renderFinanceOverviewInsights({
+  financeBreakdown,
+  cash,
+  transfer,
+  debtCash,
+  debtTransfer,
+  debtEntries,
+}) {
+  const money = (amount) => `${Number(amount || 0).toLocaleString("vi-VN")} đ`;
+  const allocation = document.getElementById("financeAllocation");
+  const collection = document.getElementById("financeCollectionBreakdown");
+  const actions = document.getElementById("financeActionList");
+  const debtInsights = null;
+  const sourceInsights = null;
+
+  if (allocation) {
+    const netPercent = financeBreakdown.total
+      ? (financeBreakdown.netIncome / financeBreakdown.total) * 100
+      : 0;
+    allocation.innerHTML = `
+      <div class="allocation-root">
+        <span>Tổng tiền ghi</span>
+        <strong>${money(financeBreakdown.total)}</strong>
+      </div>
+      <div class="allocation-branches">
+        <div class="allocation-branch upstream">
+          <span><i class="fas fa-arrow-up"></i> Chuyển cấp trên</span>
+          <strong>${money(financeBreakdown.upstreamPayable)}</strong>
+          <small>${100 - financeBreakdown.ownerRate}% tổng ghi</small>
+        </div>
+        <div class="allocation-branch commission">
+          <span><i class="fas fa-percent"></i> Hoa hồng được hưởng</span>
+          <strong>${money(financeBreakdown.grossCommission)}</strong>
+          <small>${financeBreakdown.ownerRate}% tổng ghi</small>
+        </div>
+      </div>
+      <div class="allocation-commission-split">
+        <span>Hoa hồng nhận <strong>${money(
+          financeBreakdown.grossCommission
+        )}</strong></span>
+        <span>Hoa hồng trả <strong>${money(
+          financeBreakdown.childCommission
+        )}</strong></span>
+        <span class="allocation-net">Lãi hoa hồng <strong>${money(
+          financeBreakdown.commissionIncome
+        )}</strong></span>
+      </div>
+      <div class="allocation-payout-spread">
+        <div class="allocation-payout-title">
+          <span><i class="fas fa-trophy"></i> Chênh lệch trả thưởng</span>
+          <strong>${money(financeBreakdown.payoutMargin)}</strong>
+        </div>
+        <div class="allocation-payout-values">
+          <span>Tiền trúng <strong>${money(
+            financeBreakdown.hitAmount
+          )}</strong></span>
+          <span>Cấp trên phải chung <strong>${money(
+            financeBreakdown.incomingPayout
+          )}</strong></span>
+          <span>Phải trả khách/cấp dưới <strong>${money(
+            financeBreakdown.outgoingPayout
+          )}</strong></span>
+        </div>
+        <small>Nhận mặc định ×${financeSettings.ownerPayoutRate} · Trả theo từng phiếu, mặc định ×${financeSettings.defaultPayoutRate} · Tính theo con xổ đã xác nhận</small>
+      </div>
+      <div class="allocation-final">
+        <span>Thu nhập thực nhận</span>
+        <strong>${money(
+          financeBreakdown.netIncome
+        )}</strong>
+        <small>Lãi hoa hồng + chênh lệch trả thưởng · ${netPercent.toLocaleString("vi-VN", {
+          maximumFractionDigits: 1,
+        })}% tổng ghi</small>
+      </div>`;
+  }
+
+  if (collection) {
+    const totalCollected = cash + transfer;
+    const cashPercent = totalCollected ? (cash / totalCollected) * 100 : 0;
+    const transferPercent = totalCollected
+      ? (transfer / totalCollected) * 100
+      : 0;
+    const debtCollected = debtCash + debtTransfer;
+    collection.innerHTML = `
+      <div class="collection-total"><span>Đã thu trong kỳ</span><strong>${money(
+        totalCollected
+      )}</strong></div>
+      <div class="collection-bar" aria-label="Cơ cấu tiền đã thu">
+        <span class="collection-cash-bar" style="width:${cashPercent}%"></span>
+        <span class="collection-transfer-bar" style="width:${transferPercent}%"></span>
+      </div>
+      <div class="collection-lines">
+        <div><span><i class="fas fa-money-bill-wave cash-dot"></i> Tiền mặt</span><strong>${money(
+          cash
+        )}</strong></div>
+        <div><span><i class="fas fa-building-columns transfer-dot"></i> Chuyển khoản</span><strong>${money(
+          transfer
+        )}</strong></div>
+        <div class="collection-subset"><span><i class="fas fa-rotate"></i> Trong đó thu nợ</span><strong>${money(
+          debtCollected
+        )}</strong></div>
+      </div>
+      <p>Dữ liệu cấp dưới chưa được tính vào tiền đã thu vì chưa có trạng thái đối soát.</p>`;
+  }
+
+  const outstandingRows = debtEntries
+    .map((entry) => ({
+      entry,
+      snapshot: getDebtSnapshot(entry, activeViewDateTo),
+    }))
+    .filter(({ snapshot }) => snapshot.remaining > 0);
+  const endDate = parseCalendarDate(activeViewDateTo);
+  const overdueRows = outstandingRows.filter(({ entry }) => {
+    const entryDate = parseCalendarDate(entry.date);
+    return Math.floor((endDate - entryDate) / 86400000) >= 3;
+  });
+  const outstandingAmount = outstandingRows.reduce(
+    (sum, row) => sum + row.snapshot.remaining,
+    0
+  );
+  const overdueAmount = overdueRows.reduce(
+    (sum, row) => sum + row.snapshot.remaining,
+    0
+  );
+
+  if (actions) {
+    const actionRows = [
+      {
+        icon: "fa-file-invoice-dollar",
+        tone: "warning",
+        label: `${outstandingRows.length} phiếu khách còn nợ`,
+        value: money(outstandingAmount),
+        note: "Cần thu từ khách",
+        route: "finance-debt",
+      },
+      {
+        icon: "fa-arrow-up",
+        tone: "neutral",
+        label: "Nghĩa vụ chuyển cấp trên",
+        value: money(financeBreakdown.upstreamPayable),
+        note: "Theo công thức, chưa theo dõi đã chuyển",
+        route: "",
+      },
+      {
+        icon: "fa-users",
+        tone: "purple",
+        label: "Hoa hồng cấp dưới",
+        value: money(financeBreakdown.childCommission),
+        note: "Theo công thức, chưa theo dõi đã trả",
+        route: "finance-source",
+      },
+    ];
+    actions.innerHTML = actionRows
+      .map(
+        (row) => `
+          <button type="button" class="finance-action-row ${
+            row.tone
+          }" ${
+            row.route
+              ? `onclick="navigateToRoute('${row.route}')"`
+              : "disabled"
+          }>
+            <span class="finance-action-icon"><i class="fas ${
+              row.icon
+            }"></i></span>
+            <span><strong>${row.label}</strong><small>${
+              row.note
+            }</small></span>
+            <b>${row.value}</b>
+            ${
+              row.route
+                ? '<i class="fas fa-chevron-right"></i>'
+                : '<i class="fas fa-circle-info"></i>'
+            }
+          </button>`
+      )
+      .join("");
+  }
+
+  if (debtInsights) {
+    const aging = [
+      { label: "0–2 ngày", min: 0, max: 2, amount: 0 },
+      { label: "3–7 ngày", min: 3, max: 7, amount: 0 },
+      { label: "Trên 7 ngày", min: 8, max: Infinity, amount: 0 },
+    ];
+    const debtorMap = new Map();
+    outstandingRows.forEach(({ entry, snapshot }) => {
+      const age = Math.max(
+        0,
+        Math.floor(
+          (endDate - parseCalendarDate(entry.date)) / 86400000
+        )
+      );
+      const bucket = aging.find((item) => age >= item.min && age <= item.max);
+      if (bucket) bucket.amount += snapshot.remaining;
+      const name = entry.person || "Không có tên";
+      debtorMap.set(
+        name,
+        (debtorMap.get(name) || 0) + snapshot.remaining
+      );
+    });
+    const topDebtors = Array.from(debtorMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+    debtInsights.innerHTML =
+      outstandingRows.length === 0
+        ? '<div class="finance-clean-state"><i class="fas fa-circle-check"></i><strong>Không còn công nợ</strong><span>Không có phiếu cần thu đến cuối kỳ.</span></div>'
+        : `
+          <div class="debt-aging">
+            ${aging
+              .map(
+                (item) =>
+                  `<div><span>${item.label}</span><strong>${money(
+                    item.amount
+                  )}</strong></div>`
+              )
+              .join("")}
+          </div>
+          <div class="debt-attention-line"><span>Nợ từ 3 ngày trở lên</span><strong>${overdueRows.length} phiếu · ${money(
+            overdueAmount
+          )}</strong></div>
+          <div class="top-debtors">
+            <h4>Khách còn nợ nhiều</h4>
+            ${topDebtors
+              .map(
+                ([name, amount], index) =>
+                  `<div><span><b>${index + 1}</b>${escapeHtml(
+                    name
+                  )}</span><strong>${money(amount)}</strong></div>`
+              )
+              .join("")}
+          </div>`;
+  }
+
+  if (sourceInsights) {
+    const topSources = [...financeBreakdown.rows]
+      .sort((a, b) => b.netIncome - a.netIncome)
+      .slice(0, 5);
+    sourceInsights.innerHTML =
+      topSources.length === 0
+        ? '<div class="empty-state">Chưa có dữ liệu nguồn trong kỳ</div>'
+        : `<div class="source-insight-list">
+            ${topSources
+              .map(
+                (source, index) => `
+                  <div class="source-insight-row">
+                    <span class="source-rank">${index + 1}</span>
+                    <span class="source-insight-name"><strong>${escapeHtml(
+                      source.name
+                    )}</strong><small>${
+                      source.role === "self" ? "Bản thân" : "Cấp dưới"
+                    } · Tổng ghi ${money(source.total)}</small></span>
+                    <span class="source-insight-income"><small>Thực nhận</small><strong>${money(
+                      source.netIncome
+                    )}</strong></span>
+                  </div>`
+              )
+              .join("")}
+          </div>
+          <button type="button" class="source-insight-more" onclick="navigateToRoute('finance-source')">Xem và cấu hình tất cả nguồn <i class="fas fa-arrow-right"></i></button>`;
+  }
+}
+
 function updateFinanceDashboard() {
   const visible = getVisibleEntries();
   const direct = visible.filter(isDirectEntry);
   const imported = visible.filter((entry) => !isDirectEntry(entry));
+  const financeBreakdown = getFinanceBreakdown(visible);
   const sumEntries = (entries) =>
     entries.reduce((sum, entry) => sum + (Number(entry.total) || 0), 0);
 
-  const cash = sumEntries(direct.filter((entry) => entry.paymentType === "cash"));
-  const transfer = sumEntries(
+  const saleCash = sumEntries(
+    direct.filter((entry) => entry.paymentType === "cash")
+  );
+  const saleTransfer = sumEntries(
     direct.filter((entry) => entry.paymentType === "bank_transfer")
   );
-  const debtEntries = direct.filter((entry) => entry.paymentType === "debt");
-  const debt = sumEntries(debtEntries);
+  const debtPaymentsInRange = debtPayments.filter((payment) => {
+    if (
+      payment.reversedAt ||
+      payment.paidDate < activeViewDateFrom ||
+      payment.paidDate > activeViewDateTo
+    ) {
+      return false;
+    }
+    const entry = findEntryById(payment.entryId);
+    return (
+      entry &&
+      (!activeViewSession || entry.session === activeViewSession)
+    );
+  });
+  const debtCash = debtPaymentsInRange
+    .filter((payment) => payment.method === "cash")
+    .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const debtTransfer = debtPaymentsInRange
+    .filter((payment) => payment.method === "bank_transfer")
+    .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const cash = saleCash + debtCash;
+  const transfer = saleTransfer + debtTransfer;
+  const debtEntries = getDebtEntriesAsOf(activeViewDateTo);
+  const debt = debtEntries.reduce(
+    (sum, entry) =>
+      sum + getDebtSnapshot(entry, activeViewDateTo).remaining,
+    0
+  );
 
-  setMoneyText("financeGrandTotal", sumEntries(visible));
+  setMoneyText("financeGrandTotal", financeBreakdown.total);
   setMoneyText("financeCash", cash);
   setMoneyText("financeTransfer", transfer);
   setMoneyText("financeDebt", debt);
   setMoneyText("financeCollected", cash + transfer);
   setMoneyText("financeImported", sumEntries(imported));
-
-  const debtList = document.getElementById("debtList");
-  if (debtList) {
-    if (debtEntries.length === 0) {
-      debtList.innerHTML = '<div class="empty-state">Không có phiếu nợ trong thời gian đang xem</div>';
-    } else {
-      debtList.innerHTML = `
-        <table class="debt-table">
-          <thead><tr><th>Ngày</th><th>Buổi</th><th>Khách</th><th>Người bán</th><th>Số tiền</th></tr></thead>
-          <tbody>
-            ${debtEntries
-              .map(
-                (entry) => `
-                  <tr>
-                    <td>${escapeHtml(entry.date)}</td>
-                    <td>${escapeHtml(entry.session)}</td>
-                    <td>${escapeHtml(entry.person || "")}</td>
-                    <td>${escapeHtml(entry.seller || "")}</td>
-                    <td class="debt-amount">${entry.total.toLocaleString("vi-VN")} đ</td>
-                  </tr>`
-              )
-              .join("")}
-          </tbody>
-          <tfoot><tr><td colspan="4"><strong>Tổng nợ</strong></td><td class="debt-amount">${debt.toLocaleString("vi-VN")} đ</td></tr></tfoot>
-        </table>`;
-    }
+  setMoneyText("financeGrossCommission", financeBreakdown.grossCommission);
+  setMoneyText("financeChildCommission", financeBreakdown.childCommission);
+  setMoneyText("financeNetIncome", financeBreakdown.netIncome);
+  setMoneyText("financeUpstreamPayable", financeBreakdown.upstreamPayable);
+  const grossHint = document.getElementById("financeGrossCommissionHint");
+  if (grossHint) {
+    grossHint.textContent = `Theo tỷ lệ ${financeBreakdown.ownerRate}%`;
   }
+  const upstreamHint = document.getElementById("financeUpstreamHint");
+  if (upstreamHint) {
+    upstreamHint.textContent = `Theo ${100 - financeBreakdown.ownerRate}% tổng ghi`;
+  }
+  syncFinanceSettingsForm();
+  renderFinanceOverviewInsights({
+    financeBreakdown,
+    cash,
+    transfer,
+    debtCash,
+    debtTransfer,
+    debtEntries,
+  });
+
+  renderDebtList(debtEntries);
 
   const sourceSummary = document.getElementById("sourceSummary");
   if (sourceSummary) {
-    const sourceMap = new Map();
-    visible.forEach((entry) => {
-      const sourceId = isDirectEntry(entry)
-        ? localProfile.id
-        : entry.sourceProfileId || "imported";
-      const sourceName = isDirectEntry(entry)
-        ? localProfile.name || "Dữ liệu tự nhập"
-        : entry.sourceProfileName || entry.person || "Cấp dưới";
-      const current = sourceMap.get(sourceId) || { name: sourceName, total: 0, count: 0 };
-      current.total += Number(entry.total) || 0;
-      current.count++;
-      sourceMap.set(sourceId, current);
-    });
-
-    if (sourceMap.size === 0) {
+    if (financeBreakdown.rows.length === 0) {
       sourceSummary.innerHTML = '<div class="empty-state">Chưa có dữ liệu theo nguồn</div>';
     } else {
       sourceSummary.innerHTML = `
-        <table class="source-summary-table">
-          <thead><tr><th>Nguồn</th><th>Số phiếu</th><th>Tổng tiền</th></tr></thead>
+        <div class="finance-source-note">
+          <i class="fas fa-circle-info"></i>
+          <span>Nguồn không ghi tên người bán được mặc định là <strong>Bản thân</strong>. Người bán khác và phiếu tổng nhập vào được mặc định là <strong>Cấp dưới</strong>.</span>
+        </div>
+        <div class="source-summary-scroll">
+        <table class="source-summary-table finance-source-table">
+          <colgroup>
+            <col class="source-col-name" />
+            <col class="source-col-role" />
+            <col class="source-col-count" />
+            <col class="source-col-total" />
+            <col class="source-col-commission" />
+            <col class="source-col-child" />
+            <col class="source-col-payout" />
+            <col class="source-col-net" />
+          </colgroup>
+          <thead><tr><th>Nguồn/người bán</th><th class="table-center-head">Phân loại</th><th class="table-center-head">Số phiếu</th><th class="table-number-head">Tổng ghi</th><th class="table-number-head">HH nhận (${financeBreakdown.ownerRate}%)</th><th class="table-number-head">HH nguồn giữ</th><th class="table-number-head">Chênh lệch thưởng</th><th class="table-number-head">Thực nhận</th></tr></thead>
           <tbody>
-            ${Array.from(sourceMap.values())
+            ${financeBreakdown.rows
               .sort((a, b) => b.total - a.total)
-              .map(
-                (source) => `
+              .map((source) => {
+                const encodedKey = encodeURIComponent(source.key).replace(
+                  /'/g,
+                  "%27"
+                );
+                return `
                   <tr>
-                    <td>${escapeHtml(source.name)}</td>
-                    <td>${source.count}</td>
-                    <td class="debt-amount">${source.total.toLocaleString("vi-VN")} đ</td>
-                  </tr>`
-              )
+                    <td class="table-primary-cell"><strong>${escapeHtml(source.name)}</strong><small>${source.imported ? "Phiếu tổng cấp dưới" : "Phiếu ghi trực tiếp"}</small></td>
+                    <td class="table-role-cell">
+                      <select class="finance-role-select" onchange="updateFinanceSourceConfig('${encodedKey}', 'role', this.value)" ${source.imported ? "disabled" : ""}>
+                        <option value="self" ${source.role === "self" ? "selected" : ""}>Bản thân</option>
+                        <option value="child" ${source.role === "child" ? "selected" : ""}>Cấp dưới</option>
+                      </select>
+                    </td>
+                    <td class="table-count-cell">${source.count}</td>
+                    <td class="finance-money">${source.total.toLocaleString("vi-VN")} đ</td>
+                    <td class="finance-money">${source.grossCommission.toLocaleString("vi-VN")} đ</td>
+                    <td class="finance-money">
+                      ${
+                        source.role === "child"
+                          ? `<span class="source-rate-editor"><input type="number" min="0" max="${financeBreakdown.ownerRate}" step="0.1" value="${source.childRate}" onchange="updateFinanceSourceConfig('${encodedKey}', 'childRate', this.value)" /><b>%</b></span><small>${source.childCommission.toLocaleString("vi-VN")} đ</small>`
+                          : '<span class="finance-not-applicable">—</span>'
+                      }
+                    </td>
+                    <td class="finance-money payout-margin-value${source.payoutMargin < 0 ? " is-negative" : ""}" title="Tiền trúng ${source.hitAmount.toLocaleString("vi-VN")} đ · Cấp trên phải chung ${source.incomingPayout.toLocaleString("vi-VN")} đ · Phải trả khách/cấp dưới ${source.outgoingPayout.toLocaleString("vi-VN")} đ">${source.payoutMargin.toLocaleString("vi-VN")} đ</td>
+                    <td class="finance-money finance-net-value" title="Lãi hoa hồng ${source.commissionIncome.toLocaleString("vi-VN")} đ + Chênh lệch thưởng ${source.payoutMargin.toLocaleString("vi-VN")} đ">${source.netIncome.toLocaleString("vi-VN")} đ</td>
+                  </tr>`;
+              })
               .join("")}
           </tbody>
-        </table>`;
+          <tfoot>
+            <tr><td colspan="3"><strong>Tổng cộng</strong></td><td class="finance-money">${financeBreakdown.total.toLocaleString("vi-VN")} đ</td><td class="finance-money">${financeBreakdown.grossCommission.toLocaleString("vi-VN")} đ</td><td class="finance-money">${financeBreakdown.childCommission.toLocaleString("vi-VN")} đ</td><td class="finance-money payout-margin-value${financeBreakdown.payoutMargin < 0 ? " is-negative" : ""}">${financeBreakdown.payoutMargin.toLocaleString("vi-VN")} đ</td><td class="finance-money finance-net-value">${financeBreakdown.netIncome.toLocaleString("vi-VN")} đ</td></tr>
+          </tfoot>
+        </table>
+        </div>`;
     }
   }
 }
@@ -1685,8 +3722,16 @@ function saveLocalProfile() {
     showNotification("Vui lòng nhập tên sổ!", "error");
     return;
   }
+  const previousName = localProfile.name || "";
   localProfile.name = name;
   localStorage.setItem("coNhonProfile", JSON.stringify(localProfile));
+  const sellerInput = document.getElementById("ledgerSeller");
+  if (
+    sellerInput &&
+    (!sellerInput.value.trim() || sellerInput.value.trim() === previousName)
+  ) {
+    sellerInput.value = name;
+  }
   updateProfileButton();
   updateFinanceDashboard();
   closeProfileModal();
@@ -1878,6 +3923,8 @@ function importSessionSummary(event) {
         existing.total = normalized.total;
         existing.entries = normalized.entries;
         existing.sourceProfileName = data.source.name;
+        existing.sellerSourceId = data.source.id;
+        existing.sellerRole = "child";
         existing.sourceSignature = normalized.signature;
         existing.sourceExportedAt = data.exportedAt || new Date().toISOString();
         existing.updatedAt = new Date().toISOString();
@@ -1897,6 +3944,8 @@ function importSessionSummary(event) {
           entryType: "child_summary",
           sourceProfileId: data.source.id,
           sourceProfileName: data.source.name,
+          sellerSourceId: data.source.id,
+          sellerRole: "child",
           sourceSummaryKey: normalized.summaryKey,
           sourceSignature: normalized.signature,
           sourceExportedAt: data.exportedAt || null,
@@ -1937,6 +3986,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Tải dữ liệu đã lưu
   loadDataFromLocalStorage();
+  initializeDefaultSeller();
 
   // Khởi tạo search index
   initializeSearchIndex();
@@ -1953,6 +4003,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // Khởi tạo dropdown con vật cho tra cứu xổ
   populateWinAnimalSelect();
   updateWinSellerFilter();
+  document.getElementById("winSession")?.addEventListener("change", (event) => {
+    activeViewSession = event.target.value;
+    syncViewControls();
+    refreshAllViews();
+  });
+  document.getElementById("winSeller")?.addEventListener("change", () => {
+    filterWinningEntries(false);
+  });
+  document
+    .getElementById("winAnimalSearch")
+    ?.addEventListener("input", (event) => {
+      const index = resolveAnimalSearch(event.target.value);
+      document.getElementById("winAnimal").value =
+        index === -1 ? "" : String(index);
+    });
 
   // Cập nhật undo button
   updateUndoButton();
@@ -1970,6 +4035,7 @@ document.addEventListener("DOMContentLoaded", () => {
         activeViewDateFrom = today;
         activeViewDateTo = today;
         document.getElementById("ledgerDate").value = today;
+        initializeDefaultSeller(true);
         syncViewControls();
         refreshAllViews();
         showNotification("Đã chuyển sang ngày mới!");
@@ -2127,6 +4193,10 @@ function saveDataToLocalStorage() {
     version: DATA_VERSION,
     ledgerData: ledgerData,
     paidEntries: paidEntries,
+    drawResults: drawResults,
+    payoutStates: payoutStates,
+    debtPayments: debtPayments,
+    financeSettings: financeSettings,
     lastUpdate: new Date().toLocaleString("vi-VN"),
   };
   try {
@@ -2159,6 +4229,7 @@ function normalizeLedgerEntry(entry) {
     (sum, item) => sum + item.amount,
     0
   );
+  const sellerIdentity = getSellerIdentity(entry.seller || "");
   return {
     ...entry,
     id: entry.id ?? createUuid(),
@@ -2166,6 +4237,16 @@ function normalizeLedgerEntry(entry) {
     session: entry.session === "Chiều" ? "Chiều" : "Sáng",
     person: entry.person || "",
     seller: entry.seller || "",
+    sellerSourceId:
+      entry.sellerSourceId ||
+      (entry.entryType === "child_summary"
+        ? entry.sourceProfileId || ""
+        : sellerIdentity.sellerSourceId),
+    sellerRole:
+      entry.sellerRole ||
+      (entry.entryType === "child_summary"
+        ? "child"
+        : sellerIdentity.sellerRole),
     content: entry.content || formatEntryAsText({ entries: normalizedItems }),
     total: calculatedTotal || Number(entry.total) || 0,
     entries: normalizedItems,
@@ -2188,6 +4269,56 @@ function loadDataFromLocalStorage() {
   try {
     const data = JSON.parse(savedData);
     paidEntries = data.paidEntries || {};
+    drawResults = data.drawResults || {};
+    payoutStates = data.payoutStates || {};
+    debtPayments = Array.isArray(data.debtPayments)
+      ? data.debtPayments
+          .map((payment) => ({
+            ...payment,
+            id: payment.id || createUuid(),
+            entryId: payment.entryId,
+            amount: Number(payment.amount) || 0,
+            paidDate: payment.paidDate || getCurrentDate(),
+            method:
+              payment.method === "bank_transfer"
+                ? "bank_transfer"
+                : "cash",
+            note: payment.note || "",
+            createdAt: payment.createdAt || new Date().toISOString(),
+            reversedAt: payment.reversedAt || null,
+          }))
+          .filter((payment) => payment.entryId && payment.amount > 0)
+      : [];
+    const savedFinanceSettings = data.financeSettings || {};
+    const ownerRate = normalizeCommissionRate(
+      savedFinanceSettings.ownerRate,
+      20
+    );
+    const ownerPayoutRate = normalizePayoutRate(
+      savedFinanceSettings.ownerPayoutRate,
+      28
+    );
+    financeSettings = {
+      ownerRate,
+      defaultChildRate: Math.min(
+        ownerRate,
+        normalizeCommissionRate(savedFinanceSettings.defaultChildRate, 15)
+      ),
+      ownerPayoutRate,
+      defaultPayoutRate: Math.min(
+        ownerPayoutRate,
+        normalizePayoutRate(
+          savedFinanceSettings.defaultPayoutRate ??
+            savedFinanceSettings.defaultChildPayoutRate,
+          27
+        )
+      ),
+      sourceConfigs:
+        savedFinanceSettings.sourceConfigs &&
+        typeof savedFinanceSettings.sourceConfigs === "object"
+          ? savedFinanceSettings.sourceConfigs
+          : {},
+    };
 
     if (Array.isArray(data.ledgerData)) {
       ledgerData = data.ledgerData.map(normalizeLedgerEntry);

@@ -44,8 +44,7 @@
           <div class="erp-nav-group" data-nav-group="payout">
             <button class="erp-nav-title" type="button" data-nav-group-toggle="payout"><i class="fas fa-gift"></i><span>Quản lý trả thưởng</span><i class="fas fa-chevron-down nav-group-chevron"></i></button>
             <div class="erp-nav-children">
-              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="payout-lookup">Tra cứu con xổ</button>
-              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="payout-pending">Phiếu cần trả</button>
+              <button class="erp-nav-link erp-nav-child" type="button" data-route-link="payout-lookup">Tra cứu & chung thưởng</button>
               <button class="erp-nav-link erp-nav-child" type="button" data-route-link="payout-history">Lịch sử trả thưởng</button>
             </div>
           </div>
@@ -115,11 +114,17 @@
               <i class="far fa-calendar-alt"></i>
             </button>
             <div class="date-range-popover" id="dateRangePopover">
-              <div class="date-range-fields">
-                <label class="date-field"><span>Từ ngày</span><input type="date" id="viewDateFrom" class="form-control" /></label>
-                <span class="date-range-arrow"><i class="fas fa-arrow-right"></i></span>
-                <label class="date-field"><span>Đến ngày</span><input type="date" id="viewDateTo" class="form-control" /></label>
+              <input type="hidden" id="viewDateFrom" />
+              <input type="hidden" id="viewDateTo" />
+              <div class="calendar-toolbar">
+                <button type="button" class="calendar-nav-btn" onclick="shiftCalendarMonth(-1)" aria-label="Tháng trước"><i class="fas fa-chevron-left"></i></button>
+                <div class="calendar-period-selectors">
+                  <select id="calendarMonth" aria-label="Chọn tháng"></select>
+                  <select id="calendarYear" aria-label="Chọn năm"></select>
+                </div>
+                <button type="button" class="calendar-nav-btn" onclick="shiftCalendarMonth(1)" aria-label="Tháng sau"><i class="fas fa-chevron-right"></i></button>
               </div>
+              <div class="dual-calendar" id="dateRangeCalendar"></div>
               <div class="date-range-footer">
                 <div class="quick-date-selector" id="quickDateSelector">
                   <button type="button" class="quick-date-btn active" data-range-days="1">Hôm nay</button>
@@ -165,8 +170,7 @@
               <article class="module-card module-payout">
                 <div class="module-card-head"><span><i class="fas fa-gift"></i></span><div><h3>Quản lý trả thưởng</h3><p>Tra cứu phiếu có con xổ và theo dõi trạng thái trả.</p></div></div>
                 <div class="module-links">
-                  <button type="button" data-route-link="payout-lookup"><span>Tra cứu con xổ</span><i class="fas fa-chevron-right"></i></button>
-                  <button type="button" data-route-link="payout-pending"><span>Phiếu cần trả</span><i class="fas fa-chevron-right"></i></button>
+                  <button type="button" data-route-link="payout-lookup"><span>Tra cứu & chung thưởng</span><i class="fas fa-chevron-right"></i></button>
                   <button type="button" data-route-link="payout-history"><span>Lịch sử trả thưởng</span><i class="fas fa-chevron-right"></i></button>
                 </div>
               </article>
@@ -212,7 +216,7 @@
                       </div>
                     </div>
                     <div class="form-row"><label><i class="far fa-user"></i> Khách</label><input type="text" id="ledgerPerson" class="form-control" placeholder="Tên người mua" list="personSuggestions" autocomplete="off" /><datalist id="personSuggestions"></datalist></div>
-                    <div class="form-row"><label><i class="fas fa-store"></i> Người bán</label><input type="text" id="ledgerSeller" class="form-control" placeholder="Tên người bán" list="sellerSuggestions" autocomplete="off" /><datalist id="sellerSuggestions"></datalist></div>
+                    <div class="form-row"><label><i class="fas fa-store"></i> Người bán</label><div class="seller-input-wrap"><input type="text" id="ledgerSeller" class="form-control" placeholder="Tên người bán" list="sellerSuggestions" autocomplete="off" /><button type="button" onclick="useCurrentProfileAsSeller()" title="Đặt về người bán hiện tại"><i class="fas fa-user-check"></i> Tôi</button></div><datalist id="sellerSuggestions"></datalist></div>
                     <div class="form-row">
                       <label><i class="far fa-edit"></i> Nội dung</label>
                       <textarea id="ledgerContent" class="form-control" rows="3" placeholder="VD: lân 50 chó 50, ong 50"></textarea>
@@ -255,51 +259,107 @@
           </section>
 
           <section class="app-page" data-route-page="payout-lookup">
-            <div class="page-intro"><div><h2>Tra cứu con xổ</h2><p>Lọc các phiếu có con xổ và đánh dấu đã trả thưởng.</p></div></div>
             <div class="win-lookup card">
-              <div class="card-header"><i class="fas fa-trophy"></i> Điều kiện tra cứu</div>
+              <div class="card-header"><i class="fas fa-trophy"></i> Kết quả xổ và điều kiện tra cứu</div>
               <div class="card-body win-lookup-body">
-                <div class="win-lookup-row"><label><i class="far fa-clock"></i> Buổi</label><select id="winSession" class="form-control"><option value="">-- Cả ngày --</option><option value="Sáng">Sáng</option><option value="Chiều">Chiều</option></select></div>
-                <div class="win-lookup-row"><label><i class="fas fa-paw"></i> Con xổ</label><select id="winAnimal" class="form-control"><option value="">-- Chọn con --</option></select></div>
-                <div class="win-lookup-row"><label><i class="fas fa-store"></i> Người bán</label><select id="winSeller" class="form-control"><option value="">-- Tất cả --</option></select></div>
-                <div class="win-lookup-row win-lookup-action"><button class="btn-submit" onclick="filterWinningEntries()"><i class="fas fa-filter"></i> Lọc phiếu</button></div>
+                <div class="win-lookup-row"><label><i class="far fa-clock"></i> Buổi xổ</label><select id="winSession" class="form-control"><option value="Sáng">Sáng</option><option value="Chiều">Chiều</option></select></div>
+                <div class="win-lookup-row win-animal-search-row"><label><i class="fas fa-paw"></i> Nhập con xổ</label><input id="winAnimalSearch" class="form-control" list="winAnimalSuggestions" autocomplete="off" placeholder="Nhập tên, số hoặc tên chữ…" /><datalist id="winAnimalSuggestions"></datalist><input type="hidden" id="winAnimal" /></div>
+                <div class="win-lookup-row"><label><i class="fas fa-store"></i> Người bán / nguồn</label><select id="winSeller" class="form-control"><option value="">-- Tất cả --</option></select></div>
+                <div class="win-lookup-row win-lookup-action"><button id="confirmWinningAnimalBtn" class="btn-submit" onclick="confirmWinningAnimal()"><i class="fas fa-check"></i> Xác nhận & tra phiếu</button></div>
+              </div>
+              <div class="win-confirmation" id="winConfirmation"></div>
+              <div class="payout-status-filter" id="payoutStatusFilter">
+                <button type="button" data-payout-status="unpaid" class="active" onclick="setPayoutStatusFilter('unpaid')">Chưa chung <strong id="payoutUnpaidCount">0</strong></button>
+                <button type="button" data-payout-status="paid" onclick="setPayoutStatusFilter('paid')">Đã chung <strong id="payoutPaidCount">0</strong></button>
+                <button type="button" data-payout-status="all" onclick="setPayoutStatusFilter('all')">Tất cả <strong id="payoutAllCount">0</strong></button>
               </div>
             </div>
             <div class="card" id="winResultCard" style="display:none;"><div class="card-header win-result-header"><i class="fas fa-list-check"></i> <span id="winResultTitle">Phiếu chứa con xổ</span></div><div class="card-body" id="winResultBody"></div></div>
           </section>
 
-          <section class="app-page" data-route-page="payout-pending">
-            <div class="feature-placeholder"><span class="feature-icon"><i class="fas fa-hourglass-half"></i></span><h2>Phiếu cần trả</h2><p>Phần này sẽ tổng hợp các phiếu chưa đánh dấu trả sau khi bạn tra cứu con xổ.</p><button type="button" class="primary-action" data-route-link="payout-lookup">Đi đến tra cứu con xổ</button><span class="feature-status">Khung chức năng — chờ chốt thêm nghiệp vụ</span></div>
-          </section>
-
           <section class="app-page" data-route-page="payout-history">
-            <div class="feature-placeholder"><span class="feature-icon"><i class="fas fa-clock-rotate-left"></i></span><h2>Lịch sử trả thưởng</h2><p>Dự kiến lưu theo ngày, buổi, con xổ, người nhận và số tiền đã trả.</p><button type="button" class="primary-action" data-route-link="payout-lookup">Đi đến tra cứu con xổ</button><span class="feature-status">Khung chức năng — chờ chốt thêm nghiệp vụ</span></div>
+            <div class="payout-history-toolbar card">
+              <div class="payout-history-draw-context">
+                <span class="payout-history-toolbar-label"><i class="fas fa-trophy"></i> Con xổ đã lưu</span>
+                <div id="payoutHistoryDrawInfo" class="payout-history-draw-info"></div>
+              </div>
+              <div class="payout-history-recipient">
+                <label for="payoutHistoryRecipient"><i class="fas fa-search"></i> Tìm người nhận / cấp dưới</label>
+                <input type="text" id="payoutHistoryRecipient" class="form-control" placeholder="Nhập tên để tìm…" oninput="renderPayoutHistory()" />
+              </div>
+            </div>
+            <div class="card payout-history-card">
+              <div class="card-header"><i class="fas fa-clock-rotate-left"></i> Các khoản đã chung</div>
+              <div class="card-body" id="payoutHistoryList"></div>
+            </div>
           </section>
 
           <section class="app-page" data-route-page="finance-overview">
-            <div class="page-intro"><div><h2>Tổng quan doanh thu</h2><p>Số liệu được tính theo ngày và buổi đang chọn.</p></div></div>
-            <div class="finance-grid">
-              <div class="finance-stat finance-total"><span class="finance-label">Tổng ghi sổ</span><strong id="financeGrandTotal">0 đ</strong></div>
-              <div class="finance-stat finance-collected"><span class="finance-label">Đã thu trực tiếp</span><strong id="financeCollected">0 đ</strong></div>
-              <div class="finance-stat finance-cash"><span class="finance-label">Tiền mặt</span><strong id="financeCash">0 đ</strong></div>
-              <div class="finance-stat finance-transfer"><span class="finance-label">Chuyển khoản</span><strong id="financeTransfer">0 đ</strong></div>
-              <div class="finance-stat finance-debt"><span class="finance-label">Khách nợ</span><strong id="financeDebt">0 đ</strong></div>
-              <div class="finance-stat finance-imported"><span class="finance-label">Từ cấp dưới</span><strong id="financeImported">0 đ</strong></div>
+            <div class="page-intro"><div><h2>Tổng quan doanh thu</h2><p>Chọn ngày bắt đầu và ngày kết thúc trực tiếp trên lịch để xem doanh thu, dòng tiền và phần thực nhận.</p></div></div>
+            <div class="finance-grid finance-primary-grid">
+              <div class="finance-stat finance-total"><span class="finance-label">Tổng tiền ghi</span><strong id="financeGrandTotal">0 đ</strong><small>Tất cả nguồn trong kỳ</small></div>
+              <div class="finance-stat finance-collected"><span class="finance-label">Tiền đã thu</span><strong id="financeCollected">0 đ</strong><small>Bán trực tiếp + các lần thu nợ</small></div>
+              <div class="finance-stat finance-debt"><span class="finance-label">Công nợ khách</span><strong id="financeDebt">0 đ</strong><small>Số còn nợ đến cuối kỳ</small></div>
+              <div class="finance-stat finance-net-income"><span class="finance-label">Thu nhập thực nhận</span><strong id="financeNetIncome">0 đ</strong><small>Chênh lệch hoa hồng + trả thưởng</small></div>
             </div>
-            <div class="quick-route-grid">
-              <button type="button" data-route-link="finance-debt"><i class="fas fa-file-invoice-dollar"></i><span><strong>Xem công nợ</strong><small>Danh sách khách còn nợ</small></span><i class="fas fa-arrow-right"></i></button>
-              <button type="button" data-route-link="finance-source"><i class="fas fa-sitemap"></i><span><strong>Xem theo nguồn</strong><small>Dữ liệu trực tiếp và cấp dưới</small></span><i class="fas fa-arrow-right"></i></button>
+
+            <div class="finance-dashboard-grid">
+              <section class="card finance-allocation-card">
+                <div class="card-header"><i class="fas fa-code-branch"></i> Phân bổ doanh thu</div>
+                <div class="card-body" id="financeAllocation"></div>
+              </section>
+              <section class="card finance-collection-card">
+                <div class="card-header"><i class="fas fa-wallet"></i> Cơ cấu tiền đã thu</div>
+                <div class="card-body" id="financeCollectionBreakdown"></div>
+              </section>
+              <section class="card finance-action-card">
+                <div class="card-header"><i class="fas fa-list-check"></i> Việc cần xử lý</div>
+                <div class="card-body" id="financeActionList"></div>
+              </section>
             </div>
           </section>
 
           <section class="app-page" data-route-page="finance-debt">
-            <div class="page-intro"><div><h2>Công nợ khách hàng</h2><p>Chỉ gồm các phiếu được đánh dấu “Nợ” trên máy này.</p></div></div>
+            <div class="page-intro"><div><h2>Công nợ khách hàng</h2><p>Ghi nhận khách trả một phần hoặc trả đủ, đồng thời cập nhật đúng tiền mặt và chuyển khoản theo ngày nhận.</p></div></div>
+            <div class="debt-filter-toolbar card">
+              <label><i class="fas fa-search"></i><input type="text" id="debtSearchInput" placeholder="Tìm tên khách hoặc người bán…" oninput="updateFinanceDashboard()" /></label>
+              <select id="debtStatusFilter" onchange="updateFinanceDashboard()">
+                <option value="outstanding">Còn nợ</option>
+                <option value="unpaid">Chưa trả</option>
+                <option value="partial">Đã trả một phần</option>
+                <option value="paid">Đã trả đủ</option>
+                <option value="all">Tất cả</option>
+              </select>
+            </div>
             <div class="card debt-card"><div class="card-header"><i class="fas fa-file-invoice-dollar"></i> Danh sách công nợ</div><div class="card-body" id="debtList"></div></div>
           </section>
 
           <section class="app-page" data-route-page="finance-source">
-            <div class="page-intro"><div><h2>Tổng theo nguồn dữ liệu</h2><p>Phân biệt phần ghi trực tiếp và các phiếu tổng đã nhập từ cấp dưới.</p></div></div>
-            <div class="card source-card"><div class="card-header"><i class="fas fa-sitemap"></i> Tổng theo nguồn</div><div class="card-body" id="sourceSummary"></div></div>
+            <div class="page-intro"><div><h2>Tổng theo nguồn/người bán</h2><p>Đánh dấu nguồn nào là bản thân hoặc cấp dưới và đặt tỷ lệ hoa hồng riêng để tính đúng phần thực nhận.</p></div></div>
+            <div class="card finance-rate-card">
+              <div class="card-header"><i class="fas fa-sliders"></i> Cấu hình mức chung</div>
+              <div class="card-body finance-rate-body">
+                <section class="finance-rule-group owner-rule">
+                  <div class="finance-rule-title"><i class="fas fa-arrow-down"></i><span><strong>Cấp trên trả bạn</strong><small>Mức bạn nhận từ cấp trên</small></span></div>
+                  <div class="finance-rule-fields">
+                    <label><span>Hệ số trả thưởng</span><span class="rate-input-wrap"><b>×</b><input type="number" id="financeOwnerPayoutRate" min="27" max="30" step="1" value="28" /></span></label>
+                    <label><span>Hoa hồng được hưởng</span><span class="rate-input-wrap"><input type="number" id="financeOwnerRate" min="0" max="100" step="0.1" value="20" /><b>%</b></span></label>
+                  </div>
+                </section>
+                <section class="finance-rule-group child-rule">
+                  <div class="finance-rule-title"><i class="fas fa-arrow-up"></i><span><strong>Bạn trả khách / cấp dưới</strong><small>Mức tiền ra mặc định của bạn</small></span></div>
+                  <div class="finance-rule-fields">
+                    <label><span>Hệ số chung thưởng</span><span class="rate-input-wrap"><b>×</b><input type="number" id="financeDefaultPayoutRate" min="27" max="30" step="1" value="27" /></span></label>
+                    <label><span>Hoa hồng trả cấp dưới</span><span class="rate-input-wrap"><input type="number" id="financeDefaultChildRate" min="0" max="100" step="0.1" value="15" /><b>%</b></span></label>
+                  </div>
+                </section>
+                <div class="finance-rule-footer">
+                  <p><i class="fas fa-circle-info"></i> Hệ số chung được dùng cho phiếu mới. Bạn vẫn có thể chọn riêng 27–30 trên từng phiếu trước khi chung thưởng.</p>
+                  <button type="button" class="finance-save-rate" onclick="saveFinanceSettingsFromForm()"><i class="fas fa-floppy-disk"></i> Lưu cấu hình</button>
+                </div>
+              </div>
+            </div>
+            <div class="card source-card"><div class="card-header"><i class="fas fa-sitemap"></i> Phân tích hoa hồng theo nguồn</div><div class="card-body" id="sourceSummary"></div></div>
           </section>
 
           <section class="app-page" data-route-page="data-import">
@@ -390,6 +450,27 @@
           <div class="profile-id-row"><span>Mã sổ:</span><code id="profileIdDisplay"></code></div>
         </div>
         <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeProfileModal()">Hủy</button><button class="btn-modal btn-modal-save" onclick="saveLocalProfile()"><i class="fas fa-save"></i> Lưu hồ sơ</button></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="debtPaymentModal">
+      <div class="modal-content debt-payment-modal-content">
+        <div class="modal-header"><h3><i class="fas fa-hand-holding-dollar"></i> Thu nợ khách hàng</h3><button class="modal-close" onclick="closeDebtPaymentModal()">&times;</button></div>
+        <div class="modal-body">
+          <input type="hidden" id="debtPaymentEntryId" />
+          <div class="debt-payment-summary" id="debtPaymentSummary"></div>
+          <div class="debt-payment-form-grid" id="debtPaymentForm">
+            <div class="form-row"><label><i class="fas fa-money-bill-wave"></i> Số tiền khách trả</label><input type="number" id="debtPaymentAmount" class="form-control" min="1" step="1000" /></div>
+            <div class="form-row"><label><i class="far fa-calendar-alt"></i> Ngày nhận tiền</label><input type="date" id="debtPaymentDate" class="form-control" /></div>
+            <div class="form-row"><label><i class="fas fa-wallet"></i> Hình thức nhận</label><select id="debtPaymentMethod" class="form-control"><option value="cash">Tiền mặt</option><option value="bank_transfer">Chuyển khoản</option></select></div>
+            <div class="form-row"><label><i class="far fa-note-sticky"></i> Ghi chú</label><input type="text" id="debtPaymentNote" class="form-control" maxlength="120" placeholder="Không bắt buộc" /></div>
+          </div>
+          <div class="debt-payment-history">
+            <h4><i class="fas fa-clock-rotate-left"></i> Lịch sử thu nợ</h4>
+            <div id="debtPaymentHistoryList"></div>
+          </div>
+        </div>
+        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeDebtPaymentModal()">Đóng</button><button class="btn-modal btn-modal-save" id="saveDebtPaymentBtn" onclick="saveDebtPayment()"><i class="fas fa-check"></i> Xác nhận thu nợ</button></div>
       </div>
     </div>
 
