@@ -472,7 +472,7 @@
           <div class="form-row"><label><i class="far fa-edit"></i> Nội dung</label><textarea id="editContent" class="form-control" rows="3" placeholder="VD: chó 50 lân 50"></textarea></div>
           <div class="form-row"><label><i class="fas fa-wallet"></i> Thanh toán</label><select id="editPaymentType" class="form-control"><option value="cash">Tiền mặt</option><option value="bank_transfer">Chuyển khoản</option><option value="debt">Nợ</option><option value="unknown">Chưa xác định</option></select></div>
         </div>
-        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeEditModal()"><i class="fas fa-times"></i> Hủy</button><button class="btn-modal btn-modal-save" onclick="saveEditedEntry()"><i class="fas fa-save"></i> Lưu thay đổi</button></div>
+        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeEditModal()"><i class="fas fa-times"></i> Hủy</button><button id="editSaveButton" class="btn-modal btn-modal-save database-write-enabled" onclick="saveEditedEntry()"><i class="fas fa-save"></i> Lưu thay đổi</button></div>
       </div>
     </div>
 

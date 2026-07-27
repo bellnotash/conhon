@@ -14,7 +14,6 @@
 
   const readonlyFunctions = [
     "performUndo",
-    "saveEditedEntry",
     "deleteLedgerEntry",
     "confirmWinningAnimal",
     "updatePayoutRate",
@@ -43,11 +42,18 @@
     return animal.type.toLowerCase();
   }
 
-  function normalizePayoutSnapshot(snapshot) {
-    if (!snapshot || snapshot.entryId) return snapshot || null;
+  function normalizePayoutSnapshot(snapshot, context = {}) {
+    if (!snapshot) return null;
+    if (snapshot.entryId) {
+      return {
+        ...snapshot,
+        entryId: context.entryId || snapshot.entryId,
+        drawKey: context.drawKey || snapshot.drawKey,
+      };
+    }
     return {
-      entryId: snapshot.ma_phieu || "",
-      drawKey: snapshot.ma_ket_qua || "",
+      entryId: context.entryId || snapshot.ma_phieu || "",
+      drawKey: context.drawKey || snapshot.ma_ket_qua || "",
       date: snapshot.ngay_ghi || "",
       session: vietnameseSession(snapshot.buoi),
       animalId: snapshot.ma_con || "",
@@ -135,11 +141,13 @@
       "databaseConnectionStatus"
     );
     if (sidebarStatus) {
-      const mode = window.conhonDatabaseWriteCapabilities?.includes(
-        "tao_phieu"
-      )
-        ? "tạo phiếu đã bật"
-        : "chỉ đọc";
+      const capabilities =
+        window.conhonDatabaseWriteCapabilities || [];
+      const mode = capabilities.includes("sua_phieu")
+        ? "tạo/sửa phiếu đã bật"
+        : capabilities.includes("tao_phieu")
+          ? "tạo phiếu đã bật"
+          : "chỉ đọc";
       sidebarStatus.innerHTML = `<i class="fas fa-database"></i><span>Supabase · ${count.toLocaleString(
         "vi-VN"
       )} phiếu · ${mode}</span>`;
@@ -325,7 +333,10 @@
             payout.che_do_he_so === "thu_cong" ? "manual" : "default",
           paid: Boolean(payout.da_tra),
           paidAt: payout.thoi_diem_tra,
-          snapshot: normalizePayoutSnapshot(payout.du_lieu_chot),
+          snapshot: normalizePayoutSnapshot(payout.du_lieu_chot, {
+            entryId: String(payout.ma_phieu),
+            drawKey,
+          }),
         };
       });
 
