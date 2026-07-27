@@ -2272,6 +2272,54 @@ textarea.form-control { resize: vertical; min-height: 70px; }
   }
 }
 
+.list-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-soft, #f8fafc);
+  color: var(--text-light);
+  font-size: 0.88rem;
+}
+
+.list-pagination button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  color: var(--primary-color);
+  cursor: pointer;
+}
+
+.list-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.list-pagination-summary {
+  justify-content: flex-end;
+  padding-block: 6px;
+}
+
+@media (max-width: 560px) {
+  .list-pagination {
+    gap: 8px;
+    font-size: 0.78rem;
+  }
+
+  .list-pagination button {
+    padding-inline: 9px;
+  }
+}
+
 /* ===== ERP / DMS APPLICATION SHELL ===== */
 .erp-body {
   --erp-sidebar: 270px;

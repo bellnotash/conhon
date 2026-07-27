@@ -322,7 +322,7 @@
           <section class="app-page" data-route-page="finance-debt">
             <div class="page-intro"><div><h2>Công nợ khách hàng</h2><p>Ghi nhận khách trả một phần hoặc trả đủ, đồng thời cập nhật đúng tiền mặt và chuyển khoản theo ngày nhận.</p></div></div>
             <div class="debt-filter-toolbar card">
-              <label><i class="fas fa-search"></i><input type="text" id="debtSearchInput" placeholder="Tìm tên khách hoặc người bán…" oninput="updateFinanceDashboard()" /></label>
+              <label><i class="fas fa-search"></i><input type="text" id="debtSearchInput" placeholder="Tìm tên khách hoặc người bán…" oninput="scheduleDebtFilterUpdate()" /></label>
               <select id="debtStatusFilter" onchange="updateFinanceDashboard()">
                 <option value="outstanding">Còn nợ</option>
                 <option value="unpaid">Chưa trả</option>

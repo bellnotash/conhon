@@ -181,6 +181,7 @@ function performUndo() {
     if (index !== -1) ledgerData[index] = JSON.parse(JSON.stringify(action.entry));
     showNotification("Đã hoàn tác chỉnh sửa!");
   }
+  markDataChanged();
   refreshAllViews();
   saveDataToLocalStorage();
   updateUndoButton();
@@ -231,6 +232,7 @@ let ledgerData = [];
 let nextEntryId = 1;
 const DATA_VERSION = 7;
 const SUMMARY_FILE_TYPE = "conhon-session-summary";
+const LIST_PAGE_SIZE = 50;
 let activeViewDate = getCurrentDate();
 let activeViewDateFrom = getCurrentDate();
 let activeViewDateTo = getCurrentDate();
@@ -238,6 +240,13 @@ let activeViewSession = new Date().getHours() < 12 ? "Sáng" : "Chiều";
 let calendarCursor = new Date();
 let calendarAwaitingEnd = false;
 let lastKnownToday = getCurrentDate();
+let dataRevision = 0;
+let ledgerEntryById = new Map();
+let entriesByDateSession = new Map();
+let debtPaymentsByEntryId = new Map();
+let visibleEntriesCache = { key: "", entries: [] };
+let ledgerHistoryPageState = { key: "", page: 1 };
+let debtListPageState = { key: "", page: 1 };
 
 function createUuid() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -304,7 +313,7 @@ function initializeDefaultSeller(force = false) {
 }
 
 function findEntryById(entryId) {
-  return ledgerData.find((entry) => String(entry.id) === String(entryId));
+  return ledgerEntryById.get(String(entryId));
 }
 
 function isDirectEntry(entry) {
@@ -312,12 +321,56 @@ function isDirectEntry(entry) {
 }
 
 function getVisibleEntries() {
-  return ledgerData.filter(
+  const cacheKey = [
+    dataRevision,
+    activeViewDateFrom,
+    activeViewDateTo,
+    activeViewSession || "all",
+  ].join("|");
+  if (visibleEntriesCache.key === cacheKey) {
+    return visibleEntriesCache.entries;
+  }
+  const entries = ledgerData.filter(
     (entry) =>
       entry.date >= activeViewDateFrom &&
       entry.date <= activeViewDateTo &&
       (!activeViewSession || entry.session === activeViewSession)
   );
+  visibleEntriesCache = { key: cacheKey, entries };
+  return entries;
+}
+
+function getEntriesForDateSession(date, session) {
+  return entriesByDateSession.get(`${date}|${session}`) || [];
+}
+
+function rebuildDataIndexes() {
+  ledgerEntryById = new Map();
+  entriesByDateSession = new Map();
+  debtPaymentsByEntryId = new Map();
+
+  ledgerData.forEach((entry) => {
+    const entryId = String(entry.id);
+    ledgerEntryById.set(entryId, entry);
+    const sessionKey = `${entry.date}|${entry.session}`;
+    const sessionEntries = entriesByDateSession.get(sessionKey) || [];
+    sessionEntries.push(entry);
+    entriesByDateSession.set(sessionKey, sessionEntries);
+  });
+
+  debtPayments.forEach((payment) => {
+    const entryId = String(payment.entryId);
+    const payments = debtPaymentsByEntryId.get(entryId) || [];
+    payments.push(payment);
+    debtPaymentsByEntryId.set(entryId, payments);
+  });
+
+  dataRevision += 1;
+  visibleEntriesCache = { key: "", entries: [] };
+}
+
+function markDataChanged() {
+  rebuildDataIndexes();
 }
 
 // ===== ĐÁNH DẤU ĐÃ CHUNG TIỀN =====
@@ -509,20 +562,50 @@ function rebuildGridFromLedgerData() {
   calculateTotal();
 }
 
+function refreshActiveView(route = getCurrentRoute()) {
+  switch (route) {
+    case "home":
+      updateHomeDashboard();
+      break;
+    case "ledger-entry":
+      rebuildGridFromLedgerData();
+      break;
+    case "ledger-history":
+      updateSellerFilter();
+      renderLedgerEntries();
+      updateSellerSummary();
+      break;
+    case "payout-lookup":
+      updateWinSellerFilter();
+      syncPayoutLookupForActiveView();
+      break;
+    case "payout-history":
+      renderPayoutHistory();
+      break;
+    case "finance-overview":
+    case "finance-debt":
+    case "finance-source":
+      updateFinanceDashboard(route);
+      break;
+    case "data-imported":
+      renderImportedEntries();
+      break;
+    case "data-export":
+      updateExportSummaryPreview();
+      updateExportSessionButton();
+      break;
+    case "tools-backup":
+    case "tools-data":
+      updateStorageUsage();
+      break;
+    default:
+      break;
+  }
+}
+
+// Giữ tên cũ để các luồng thao tác hiện tại chỉ làm mới màn hình đang mở.
 function refreshAllViews() {
-  rebuildGridFromLedgerData();
-  updateSellerFilter();
-  renderLedgerEntries();
-  updateSellerSummary();
-  updateWinSellerFilter();
-  syncPayoutLookupForActiveView();
-  renderPayoutHistory();
-  updateFinanceDashboard();
-  updateHomeDashboard();
-  renderImportedEntries();
-  updateExportSummaryPreview();
-  updateExportSessionButton();
-  updateStorageUsage();
+  refreshActiveView();
 }
 
 // Cập nhật hàm processLedgerEntry để lấy giá trị radio button
@@ -575,6 +658,7 @@ function processLedgerEntry() {
   };
   applySellerIdentity(entryRecord, seller);
   ledgerData.unshift(entryRecord);
+  markDataChanged();
   pushUndo({ type: "add_entry", entryId: entryRecord.id });
 
   // Lưu tên người ghi + người bán gần nhất
@@ -757,6 +841,54 @@ async function copyEntryText(entryId) {
   }
 }
 
+function getPagedRows(rows, pageState, key) {
+  if (pageState.key !== key) {
+    pageState.key = key;
+    pageState.page = 1;
+  }
+  const pageCount = Math.max(1, Math.ceil(rows.length / LIST_PAGE_SIZE));
+  pageState.page = Math.min(Math.max(1, pageState.page), pageCount);
+  const start = (pageState.page - 1) * LIST_PAGE_SIZE;
+  return {
+    rows: rows.slice(start, start + LIST_PAGE_SIZE),
+    page: pageState.page,
+    pageCount,
+    total: rows.length,
+  };
+}
+
+function renderPaginationControls(type, page, pageCount, total) {
+  if (total <= LIST_PAGE_SIZE) {
+    return `<div class="list-pagination list-pagination-summary"><span>${total.toLocaleString(
+      "vi-VN"
+    )} phiếu</span></div>`;
+  }
+  const handler =
+    type === "ledger" ? "changeLedgerHistoryPage" : "changeDebtListPage";
+  return `
+    <div class="list-pagination">
+      <button type="button" onclick="${handler}(${page - 1})" ${
+        page <= 1 ? "disabled" : ""
+      }><i class="fas fa-chevron-left"></i> Trước</button>
+      <span>Trang <strong>${page}</strong> / ${pageCount} · ${total.toLocaleString(
+        "vi-VN"
+      )} phiếu</span>
+      <button type="button" onclick="${handler}(${page + 1})" ${
+        page >= pageCount ? "disabled" : ""
+      }>Sau <i class="fas fa-chevron-right"></i></button>
+    </div>`;
+}
+
+function changeLedgerHistoryPage(page) {
+  ledgerHistoryPageState.page = page;
+  renderLedgerEntries();
+}
+
+function changeDebtListPage(page) {
+  debtListPageState.page = page;
+  updateFinanceDashboard("finance-debt");
+}
+
 function renderLedgerEntries() {
   const container = document.getElementById("ledgerEntries");
   const filterSeller = document.getElementById("sellerFilter")?.value || "";
@@ -773,7 +905,22 @@ function renderLedgerEntries() {
     return;
   }
 
-  container.innerHTML = filtered.map((entry) => {
+  const pageKey = [
+    dataRevision,
+    activeViewDateFrom,
+    activeViewDateTo,
+    activeViewSession || "all",
+    filterSeller,
+  ].join("|");
+  const paged = getPagedRows(filtered, ledgerHistoryPageState, pageKey);
+  container.innerHTML =
+    renderPaginationControls(
+      "ledger",
+      paged.page,
+      paged.pageCount,
+      paged.total
+    ) +
+    paged.rows.map((entry) => {
     const sessionIcon = entry.session === "Sáng" ? "fa-sun" : "fa-moon";
     const sellerBadge = entry.seller
       ? `<span class="ledger-entry-seller"><i class="fas fa-store"></i> ${escapeHtml(entry.seller)}</span>`
@@ -821,7 +968,7 @@ function renderLedgerEntries() {
         <div class="ledger-entry-total">Tổng cộng: ${entry.total.toLocaleString("vi-VN")} đ</div>
       </div>
     `;
-  }).join("");
+    }).join("");
   scheduleLedgerHistoryHeight();
 }
 
@@ -840,6 +987,11 @@ function scheduleLedgerHistoryHeight() {
     const padding =
       (parseFloat(styles.paddingTop) || 0) +
       (parseFloat(styles.paddingBottom) || 0);
+    const pagination = container.querySelector(".list-pagination");
+    const paginationHeight = pagination
+      ? pagination.offsetHeight +
+        (parseFloat(getComputedStyle(pagination).marginBottom) || 0)
+      : 0;
     const fourEntriesHeight = entries.slice(0, 4).reduce((height, entry) => {
       const entryStyles = getComputedStyle(entry);
       return (
@@ -849,7 +1001,7 @@ function scheduleLedgerHistoryHeight() {
       );
     }, 0);
     container.style.maxHeight = `${Math.ceil(
-      padding + fourEntriesHeight
+      padding + paginationHeight + fourEntriesHeight
     )}px`;
     container.classList.add("history-scroll-active");
   });
@@ -956,6 +1108,7 @@ function saveEditedEntry() {
   entry.paymentType = newPaymentType;
   entry.updatedAt = new Date().toISOString();
 
+  markDataChanged();
   refreshAllViews();
   saveDataToLocalStorage();
   closeEditModal();
@@ -996,6 +1149,7 @@ function deleteLedgerEntry(entryId) {
   });
   ledgerData.splice(entryIndex, 1);
 
+  markDataChanged();
   refreshAllViews();
   saveDataToLocalStorage();
   showNotification("Đã xóa mục ghi sổ!");
@@ -1605,13 +1759,7 @@ function confirmWinningAnimal() {
 function getPayoutMatches(confirmedDraw) {
   const seller = document.getElementById("winSeller")?.value || "";
   const matches = [];
-  ledgerData.forEach((entry) => {
-    if (
-      entry.date !== confirmedDraw.date ||
-      entry.session !== confirmedDraw.session
-    ) {
-      return;
-    }
+  getEntriesForDateSession(confirmedDraw.date, confirmedDraw.session).forEach((entry) => {
     const recipient = getPayoutRecipient(entry);
     const sourceFilter = entry.seller || recipient.name;
     if (seller && sourceFilter !== seller) return;
@@ -1929,7 +2077,6 @@ function togglePaidStatus(entryId) {
     : null;
   saveDataToLocalStorage();
   filterWinningEntries(false);
-  renderPayoutHistory();
   showNotification(
     state.paid ? "Đã đánh dấu đã chung!" : "Đã chuyển về chưa chung!"
   );
@@ -2130,11 +2277,9 @@ function showRoute(route) {
   }
   if (usesSingleDate) {
     syncViewControls();
-    if (singleDateWasReset) refreshAllViews();
   } else {
     syncViewControls();
   }
-  if (validRoute === "ledger-history") scheduleLedgerHistoryHeight();
   if (validRoute === "payout-lookup") {
     if (activeViewDateFrom !== activeViewDateTo) {
       activeViewDateFrom = activeViewDateTo;
@@ -2144,7 +2289,6 @@ function showRoute(route) {
       activeViewSession = "Sáng";
     }
     syncViewControls();
-    syncPayoutLookupForActiveView();
   }
   if (validRoute === "payout-history") {
     if (activeViewDateFrom !== activeViewDateTo) {
@@ -2152,8 +2296,8 @@ function showRoute(route) {
       activeViewDate = activeViewDateTo;
     }
     syncViewControls();
-    renderPayoutHistory();
   }
+  refreshActiveView(validRoute);
 }
 
 function navigateToRoute(route) {
@@ -2886,9 +3030,9 @@ function updateFinanceSourceConfig(encodedKey, field, value) {
 }
 
 function getDebtPaymentsForEntry(entryId, cutoffDate = "") {
-  return debtPayments.filter(
+  const payments = debtPaymentsByEntryId.get(String(entryId)) || [];
+  return payments.filter(
     (payment) =>
-      String(payment.entryId) === String(entryId) &&
       !payment.reversedAt &&
       (!cutoffDate || payment.paidDate <= cutoffDate)
   );
@@ -2937,6 +3081,15 @@ function getDebtEntriesAsOf(cutoffDate = activeViewDateTo) {
   );
 }
 
+let debtFilterTimer = null;
+function scheduleDebtFilterUpdate() {
+  clearTimeout(debtFilterTimer);
+  debtFilterTimer = setTimeout(() => {
+    debtListPageState.page = 1;
+    updateFinanceDashboard("finance-debt");
+  }, 220);
+}
+
 function renderDebtList(entries) {
   const container = document.getElementById("debtList");
   if (!container) return;
@@ -2966,6 +3119,14 @@ function renderDebtList(entries) {
       }
       return String(b.entry.date).localeCompare(String(a.entry.date));
     });
+  const pageKey = [
+    dataRevision,
+    activeViewDateTo,
+    activeViewSession || "all",
+    search,
+    statusFilter,
+  ].join("|");
+  const paged = getPagedRows(rows, debtListPageState, pageKey);
 
   const allSnapshots = entries.map((entry) =>
     getDebtSnapshot(entry, activeViewDateTo)
@@ -3007,7 +3168,7 @@ function renderDebtList(entries) {
               </colgroup>
               <thead><tr><th>Khách / người bán</th><th>Ngày ghi</th><th class="table-number-head">Tổng phiếu</th><th class="table-number-head">Đã trả</th><th class="table-number-head">Còn nợ</th><th class="table-center-head">Trạng thái</th><th class="table-center-head">Thao tác</th></tr></thead>
               <tbody>
-                ${rows
+                ${paged.rows
                   .map(({ entry, snapshot }) => {
                     const status = getDebtStatusMeta(snapshot.status);
                     return `<tr>
@@ -3048,7 +3209,13 @@ function renderDebtList(entries) {
                   .join("")}
               </tbody>
             </table>
-          </div>`
+          </div>
+          ${renderPaginationControls(
+            "debt",
+            paged.page,
+            paged.pageCount,
+            paged.total
+          )}`
     }`;
 }
 
@@ -3181,6 +3348,7 @@ function saveDebtPayment() {
     createdAt: new Date().toISOString(),
     reversedAt: null,
   });
+  markDataChanged();
   saveDataToLocalStorage();
   refreshAllViews();
   renderDebtPaymentModal(entry);
@@ -3200,6 +3368,7 @@ function reverseDebtPayment(paymentId) {
   if (!payment || payment.reversedAt) return;
   if (!confirm("Hủy lần thu nợ này và cộng lại công nợ cho khách?")) return;
   payment.reversedAt = new Date().toISOString();
+  markDataChanged();
   saveDataToLocalStorage();
   refreshAllViews();
   const entry = findEntryById(payment.entryId);
@@ -3474,7 +3643,13 @@ function renderFinanceOverviewInsights({
   }
 }
 
-function updateFinanceDashboard() {
+function updateFinanceDashboard(route = getCurrentRoute()) {
+  if (route === "finance-debt") {
+    renderDebtList(getDebtEntriesAsOf(activeViewDateTo));
+    return;
+  }
+  if (!["finance-overview", "finance-source"].includes(route)) return;
+
   const visible = getVisibleEntries();
   const direct = visible.filter(isDirectEntry);
   const imported = visible.filter((entry) => !isDirectEntry(entry));
@@ -3517,37 +3692,40 @@ function updateFinanceDashboard() {
     0
   );
 
-  setMoneyText("financeGrandTotal", financeBreakdown.total);
-  setMoneyText("financeCash", cash);
-  setMoneyText("financeTransfer", transfer);
-  setMoneyText("financeDebt", debt);
-  setMoneyText("financeCollected", cash + transfer);
-  setMoneyText("financeImported", sumEntries(imported));
-  setMoneyText("financeGrossCommission", financeBreakdown.grossCommission);
-  setMoneyText("financeChildCommission", financeBreakdown.childCommission);
-  setMoneyText("financeNetIncome", financeBreakdown.netIncome);
-  setMoneyText("financeUpstreamPayable", financeBreakdown.upstreamPayable);
-  const grossHint = document.getElementById("financeGrossCommissionHint");
-  if (grossHint) {
-    grossHint.textContent = `Theo tỷ lệ ${financeBreakdown.ownerRate}%`;
+  if (route === "finance-overview") {
+    setMoneyText("financeGrandTotal", financeBreakdown.total);
+    setMoneyText("financeCash", cash);
+    setMoneyText("financeTransfer", transfer);
+    setMoneyText("financeDebt", debt);
+    setMoneyText("financeCollected", cash + transfer);
+    setMoneyText("financeImported", sumEntries(imported));
+    setMoneyText("financeGrossCommission", financeBreakdown.grossCommission);
+    setMoneyText("financeChildCommission", financeBreakdown.childCommission);
+    setMoneyText("financeNetIncome", financeBreakdown.netIncome);
+    setMoneyText("financeUpstreamPayable", financeBreakdown.upstreamPayable);
+    const grossHint = document.getElementById("financeGrossCommissionHint");
+    if (grossHint) {
+      grossHint.textContent = `Theo tỷ lệ ${financeBreakdown.ownerRate}%`;
+    }
+    const upstreamHint = document.getElementById("financeUpstreamHint");
+    if (upstreamHint) {
+      upstreamHint.textContent = `Theo ${100 - financeBreakdown.ownerRate}% tổng ghi`;
+    }
+    renderFinanceOverviewInsights({
+      financeBreakdown,
+      cash,
+      transfer,
+      debtCash,
+      debtTransfer,
+      debtEntries,
+    });
   }
-  const upstreamHint = document.getElementById("financeUpstreamHint");
-  if (upstreamHint) {
-    upstreamHint.textContent = `Theo ${100 - financeBreakdown.ownerRate}% tổng ghi`;
-  }
-  syncFinanceSettingsForm();
-  renderFinanceOverviewInsights({
-    financeBreakdown,
-    cash,
-    transfer,
-    debtCash,
-    debtTransfer,
-    debtEntries,
-  });
+  if (route === "finance-source") syncFinanceSettingsForm();
 
-  renderDebtList(debtEntries);
-
-  const sourceSummary = document.getElementById("sourceSummary");
+  const sourceSummary =
+    route === "finance-source"
+      ? document.getElementById("sourceSummary")
+      : null;
   if (sourceSummary) {
     if (financeBreakdown.rows.length === 0) {
       sourceSummary.innerHTML = '<div class="empty-state">Chưa có dữ liệu theo nguồn</div>';
@@ -3739,9 +3917,7 @@ function saveLocalProfile() {
 }
 
 function getSessionEntries(date, session) {
-  return ledgerData.filter(
-    (entry) => entry.date === date && entry.session === session
-  );
+  return getEntriesForDateSession(date, session);
 }
 
 function aggregateEntriesByAnimal(entries) {
@@ -3956,6 +4132,7 @@ function importSessionSummary(event) {
         pushUndo({ type: "add_entry", entryId: importedEntry.id });
       }
 
+      markDataChanged();
       activeViewDate = data.date;
       activeViewDateFrom = data.date;
       activeViewDateTo = data.date;
@@ -4263,6 +4440,7 @@ function normalizeLedgerEntry(entry) {
 function loadDataFromLocalStorage() {
   const savedData = localStorage.getItem("coNhonData");
   if (!savedData) {
+    rebuildDataIndexes();
     refreshAllViews();
     return;
   }
@@ -4327,6 +4505,7 @@ function loadDataFromLocalStorage() {
       ledgerData = ledgerData.map(normalizeLedgerEntry);
     }
 
+    rebuildDataIndexes();
     refreshAllViews();
     const badge = document.getElementById("lastUpdateBadge");
     if (badge && data.lastUpdate) {
