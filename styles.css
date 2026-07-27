@@ -198,7 +198,7 @@ body {
 .auth-logout-btn[hidden] { display: none; }
 .database-readonly .btn-submit:not(.database-write-enabled),
 .database-readonly .btn-modal-save:not(.database-write-enabled),
-.database-readonly .finance-save-rate,
+.database-readonly .finance-save-rate:not(.database-write-enabled),
 .database-readonly .danger-action {
   cursor: not-allowed;
 }

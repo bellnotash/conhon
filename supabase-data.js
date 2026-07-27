@@ -13,17 +13,6 @@
   };
 
   const readonlyFunctions = [
-    "performUndo",
-    "deleteLedgerEntry",
-    "confirmWinningAnimal",
-    "updatePayoutRate",
-    "togglePaidStatus",
-    "saveFinanceSettingsFromForm",
-    "updateFinanceSourceConfig",
-    "saveDebtPayment",
-    "reverseDebtPayment",
-    "saveLocalProfile",
-    "importSessionSummary",
     "clearAllData",
     "importBackup",
   ];
@@ -144,7 +133,9 @@
       const capabilities =
         window.conhonDatabaseWriteCapabilities || [];
       const mode = capabilities.includes("sua_phieu")
-        ? "tạo/sửa phiếu đã bật"
+        ? capabilities.includes("nhap_cap_duoi")
+          ? "đồng bộ đầy đủ"
+          : "tạo/sửa phiếu đã bật"
         : capabilities.includes("tao_phieu")
           ? "tạo phiếu đã bật"
           : "chỉ đọc";
@@ -317,6 +308,7 @@
         const key = `${draw.ngay_xo}|${session}`;
         drawKeyById.set(String(draw.ma_ket_qua), key);
         mappedDraws[key] = {
+          databaseId: String(draw.ma_ket_qua),
           animalId: String(draw.ma_con),
           confirmedAt: draw.thoi_diem_xac_nhan,
           updatedAt: draw.ngay_cap_nhat,
@@ -403,6 +395,7 @@
 
       window.conhonDatabaseSnapshot = {
         book,
+        sources: sources.map((source) => ({ ...source })),
         selfSourceId:
           sources.find((source) => source.loai_nguon === "ban_than")
             ?.ma_nguon || null,

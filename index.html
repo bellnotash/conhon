@@ -300,7 +300,7 @@
                 <div class="win-lookup-row"><label><i class="far fa-clock"></i> Buổi xổ</label><select id="winSession" class="form-control"><option value="Sáng">Sáng</option><option value="Chiều">Chiều</option></select></div>
                 <div class="win-lookup-row win-animal-search-row"><label><i class="fas fa-paw"></i> Nhập con xổ</label><input id="winAnimalSearch" class="form-control" list="winAnimalSuggestions" autocomplete="off" placeholder="Nhập tên, số hoặc tên chữ…" /><datalist id="winAnimalSuggestions"></datalist><input type="hidden" id="winAnimal" /></div>
                 <div class="win-lookup-row"><label><i class="fas fa-store"></i> Người bán / nguồn</label><select id="winSeller" class="form-control"><option value="">-- Tất cả --</option></select></div>
-                <div class="win-lookup-row win-lookup-action"><button id="confirmWinningAnimalBtn" class="btn-submit" onclick="confirmWinningAnimal()"><i class="fas fa-check"></i> Xác nhận & tra phiếu</button></div>
+                <div class="win-lookup-row win-lookup-action"><button id="confirmWinningAnimalBtn" class="btn-submit database-write-enabled" onclick="confirmWinningAnimal()"><i class="fas fa-check"></i> Xác nhận & tra phiếu</button></div>
               </div>
               <div class="win-confirmation" id="winConfirmation"></div>
               <div class="payout-status-filter" id="payoutStatusFilter">
@@ -390,7 +390,7 @@
                 </section>
                 <div class="finance-rule-footer">
                   <p><i class="fas fa-circle-info"></i> Hệ số chung được dùng cho phiếu mới. Bạn vẫn có thể chọn riêng 27–30 trên từng phiếu trước khi chung thưởng.</p>
-                  <button type="button" class="finance-save-rate" onclick="saveFinanceSettingsFromForm()"><i class="fas fa-floppy-disk"></i> Lưu cấu hình</button>
+                  <button type="button" class="finance-save-rate database-write-enabled" onclick="saveFinanceSettingsFromForm()"><i class="fas fa-floppy-disk"></i> Lưu cấu hình</button>
                 </div>
               </div>
             </div>
@@ -484,7 +484,7 @@
           <div class="form-row"><label for="profileName"><i class="fas fa-signature"></i> Tên sổ</label><input type="text" id="profileName" class="form-control" maxlength="80" placeholder="VD: Sổ của Thiện" /></div>
           <div class="profile-id-row"><span>Mã sổ:</span><code id="profileIdDisplay"></code></div>
         </div>
-        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeProfileModal()">Hủy</button><button class="btn-modal btn-modal-save" onclick="saveLocalProfile()"><i class="fas fa-save"></i> Lưu hồ sơ</button></div>
+        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeProfileModal()">Hủy</button><button class="btn-modal btn-modal-save database-write-enabled" onclick="saveLocalProfile()"><i class="fas fa-save"></i> Lưu hồ sơ</button></div>
       </div>
     </div>
 
@@ -505,7 +505,7 @@
             <div id="debtPaymentHistoryList"></div>
           </div>
         </div>
-        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeDebtPaymentModal()">Đóng</button><button class="btn-modal btn-modal-save" id="saveDebtPaymentBtn" onclick="saveDebtPayment()"><i class="fas fa-check"></i> Xác nhận thu nợ</button></div>
+        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeDebtPaymentModal()">Đóng</button><button class="btn-modal btn-modal-save database-write-enabled" id="saveDebtPaymentBtn" onclick="saveDebtPayment()"><i class="fas fa-check"></i> Xác nhận thu nợ</button></div>
       </div>
     </div>
 
