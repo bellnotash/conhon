@@ -11,9 +11,38 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>
-  <body class="erp-body">
+  <body class="erp-body auth-locked">
     <div class="loading-overlay" id="loadingOverlay"><div class="loading-spinner"></div></div>
     <div class="notification" id="notification"></div>
+
+    <section class="auth-gate" id="authGate" aria-hidden="false">
+      <div class="auth-card">
+        <div class="auth-brand-mark"><i class="fas fa-book-open"></i></div>
+        <div class="auth-card-heading">
+          <span>SỔ GHI TRỰC TUYẾN</span>
+          <h1>Đăng nhập hệ thống</h1>
+          <p>Dùng tài khoản đã tạo trong Supabase để truy cập sổ của bạn.</p>
+        </div>
+        <form class="auth-form" id="authForm">
+          <label for="authEmail">Email</label>
+          <div class="auth-input">
+            <i class="far fa-envelope"></i>
+            <input id="authEmail" name="email" type="email" autocomplete="username" required />
+          </div>
+          <label for="authPassword">Mật khẩu</label>
+          <div class="auth-input">
+            <i class="fas fa-lock"></i>
+            <input id="authPassword" name="password" type="password" autocomplete="current-password" required />
+          </div>
+          <p class="auth-message" id="authMessage" aria-live="polite"></p>
+          <button class="auth-submit" id="authSubmitButton" type="submit">
+            <i class="fas fa-right-to-bracket"></i> Đăng nhập
+          </button>
+          <button class="auth-retry" id="authRetryButton" type="button">Kết nối lại</button>
+        </form>
+        <p class="auth-security-note"><i class="fas fa-shield-halved"></i> Dữ liệu được bảo vệ bằng tài khoản và Row Level Security.</p>
+      </div>
+    </section>
 
     <div class="erp-shell">
       <aside class="erp-sidebar" id="appSidebar">
@@ -79,8 +108,10 @@
         </nav>
 
         <div class="erp-sidebar-footer">
-          <i class="fas fa-laptop"></i>
-          <span>Dữ liệu đang lưu trên trình duyệt này</span>
+          <div id="databaseConnectionStatus">
+            <i class="fas fa-cloud-arrow-up"></i>
+            <span>Đang kết nối Supabase</span>
+          </div>
         </div>
       </aside>
 
@@ -99,6 +130,10 @@
           </div>
           <div class="erp-topbar-actions">
             <span class="badge-update" id="lastUpdateBadge"><i class="fas fa-clock"></i> Chưa có dữ liệu</span>
+            <button class="auth-logout-btn" id="authLogoutButton" type="button" onclick="signOutSupabase()" hidden title="Đăng xuất">
+              <i class="fas fa-arrow-right-from-bracket"></i>
+              <span>Đăng xuất</span>
+            </button>
             <button onclick="openProfileModal()" class="profile-top-btn" type="button">
               <span class="profile-avatar"><i class="fas fa-user"></i></span>
               <span id="profileButtonLabel">Tên sổ</span>
@@ -474,6 +509,8 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-auth.js"></script>
     <script src="script.js"></script>
   </body>
 </html>
