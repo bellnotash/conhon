@@ -14,7 +14,6 @@
 
   const readonlyFunctions = [
     "performUndo",
-    "processLedgerEntry",
     "saveEditedEntry",
     "deleteLedgerEntry",
     "confirmWinningAnimal",
@@ -136,9 +135,14 @@
       "databaseConnectionStatus"
     );
     if (sidebarStatus) {
+      const mode = window.conhonDatabaseWriteCapabilities?.includes(
+        "tao_phieu"
+      )
+        ? "tạo phiếu đã bật"
+        : "chỉ đọc";
       sidebarStatus.innerHTML = `<i class="fas fa-database"></i><span>Supabase · ${count.toLocaleString(
         "vi-VN"
-      )} phiếu · chỉ đọc</span>`;
+      )} phiếu · ${mode}</span>`;
     }
     const badge = document.getElementById("lastUpdateBadge");
     if (badge) {
@@ -148,11 +152,14 @@
     }
   }
 
-  async function loadDatabaseData(authState) {
+  async function loadDatabaseData(authState, force = false) {
     const client = window.conhonSupabase;
     const book = authState?.book;
     if (!client || !book?.ma_so) {
       return;
+    }
+    if (force) {
+      loadedBookId = null;
     }
     if (
       loadingBookId === book.ma_so ||
@@ -385,6 +392,9 @@
 
       window.conhonDatabaseSnapshot = {
         book,
+        selfSourceId:
+          sources.find((source) => source.loai_nguon === "ban_than")
+            ?.ma_nguon || null,
         counts: {
           entries: mappedEntries.length,
           details: databaseDetails.length,
@@ -399,6 +409,11 @@
         ),
       };
       loadedBookId = bookId;
+      window.dispatchEvent(
+        new CustomEvent("conhon:database-loaded", {
+          detail: window.conhonDatabaseSnapshot,
+        })
+      );
 
       showNotification(
         `Đã tải ${mappedEntries.length.toLocaleString(
@@ -429,4 +444,8 @@
   window.addEventListener("conhon:auth-ready", (event) => {
     loadDatabaseData(event.detail);
   });
+
+  window.reloadConhonDatabase = function () {
+    return loadDatabaseData(window.conhonAuth, true);
+  };
 })();

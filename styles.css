@@ -196,11 +196,18 @@ body {
   cursor: pointer;
 }
 .auth-logout-btn[hidden] { display: none; }
-.database-readonly .btn-submit,
+.database-readonly .btn-submit:not(.database-write-enabled),
 .database-readonly .btn-modal-save,
 .database-readonly .finance-save-rate,
 .database-readonly .danger-action {
   cursor: not-allowed;
+}
+.database-readonly .database-write-enabled {
+  cursor: pointer;
+}
+.database-readonly .database-write-enabled:disabled {
+  cursor: wait;
+  opacity: .7;
 }
 .database-readonly .erp-sidebar-footer {
   color: #b9d9ff;

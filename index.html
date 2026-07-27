@@ -267,7 +267,7 @@
                     </div>
                     <div class="parse-preview" id="parsePreview"><div class="parse-preview-empty">Nhập nội dung để xem kết quả nhận dạng</div></div>
                     <div class="form-total-row"><span class="form-total-label">Tổng cộng:</span><span id="ledgerTotal" class="form-total-value">0 đ</span></div>
-                    <button onclick="processLedgerEntry()" class="btn-submit"><i class="fas fa-check-circle"></i> Ghi vào sổ</button>
+                    <button id="ledgerSubmitButton" onclick="processLedgerEntry()" class="btn-submit database-write-enabled"><i class="fas fa-check-circle"></i> Ghi vào sổ</button>
                   </div>
                 </section>
               </aside>
@@ -513,5 +513,6 @@
     <script src="supabase-auth.js"></script>
     <script src="script.js"></script>
     <script src="supabase-data.js"></script>
+    <script src="supabase-writes.js"></script>
   </body>
 </html>
