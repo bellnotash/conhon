@@ -5,6 +5,7 @@ const vm = require("node:vm");
 
 const calls = [];
 const notifications = [];
+const loggedErrors = [];
 const elements = new Map();
 const element = (id) => {
   if (!elements.has(id)) {
@@ -63,7 +64,10 @@ const client = {
 };
 
 const context = {
-  console,
+  console: {
+    ...console,
+    error: (...args) => loggedErrors.push(args),
+  },
   setTimeout,
   clearTimeout,
   confirm: () => true,
@@ -351,6 +355,12 @@ async function run() {
     calls.filter((call) => call.name === "nhap_phieu_cap_duoi").length,
     importRpcCount,
     "Không được nhập phiếu do chính sổ này xuất"
+  );
+  assert.ok(
+    loggedErrors.some((args) =>
+      String(args[1]?.message || "").includes("chính sổ này xuất")
+    ),
+    "Phải báo rõ lý do chặn phiếu tự xuất"
   );
 
   assert.equal(JSON.stringify(context.window.conhonDatabaseWriteCapabilities), JSON.stringify([
