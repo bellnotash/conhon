@@ -80,7 +80,9 @@
   async function loadBook() {
     const { data, error } = await state.client
       .from("so_ghi")
-      .select("ma_so, ma_chu_so, ten_so, mui_gio, dang_hoat_dong")
+      .select(
+        "ma_so, ma_chu_so, ten_so, ma_ho_so_cu, mui_gio, dang_hoat_dong"
+      )
       .eq("dang_hoat_dong", true)
       .order("ngay_tao", { ascending: true })
       .limit(1)
