@@ -17,6 +17,7 @@
     "tra_thuong",
     "cong_no",
     "cau_hinh",
+    "nguon_thu_cong",
     "ho_so",
     "nhap_cap_duoi",
   ];
@@ -87,10 +88,56 @@
     });
   }
 
-  function isOwnerSeller(seller) {
-    return (
-      removeVietnameseDiacritics(seller).toLowerCase() ===
-      removeVietnameseDiacritics(localProfile.name || "").toLowerCase()
+  function selectedSellerSource(scope = "ledger") {
+    const snapshot = window.conhonDatabaseSnapshot;
+    const selected =
+      typeof getSelectedSellerSource === "function"
+        ? getSelectedSellerSource(scope)
+        : null;
+    if (selected?.id && selected?.name) return selected;
+    return {
+      id: snapshot?.selfSourceId || null,
+      name: localProfile.name || "",
+      type: "ban_than",
+      role: "self",
+    };
+  }
+
+  function normalizeDuplicateText(value) {
+    return removeVietnameseDiacritics(String(value || ""))
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function findLikelyDuplicate({
+    sourceId,
+    date,
+    session,
+    person,
+    content,
+    total,
+    excludedEntryId = null,
+  }) {
+    return ledgerData.find(
+      (entry) =>
+        String(entry.id) !== String(excludedEntryId || "") &&
+        entry.entryType === "direct" &&
+        String(entry.sellerSourceId || "") === String(sourceId) &&
+        entry.date === date &&
+        entry.session === session &&
+        normalizeDuplicateText(entry.person) ===
+          normalizeDuplicateText(person) &&
+        normalizeDuplicateText(entry.content) ===
+          normalizeDuplicateText(content) &&
+        Number(entry.total || 0) === Number(total || 0)
+    );
+  }
+
+  function confirmLikelyDuplicate(details) {
+    if (!findLikelyDuplicate(details)) return true;
+    return confirm(
+      "Có một phiếu rất giống phiếu này trong cùng ngày, buổi và người bán. Bạn vẫn muốn lưu?"
     );
   }
 
@@ -110,10 +157,8 @@
     const session =
       document.querySelector('input[name="session"]:checked')?.value || "";
     const person = document.getElementById("ledgerPerson")?.value.trim() || "";
-    const seller =
-      document.getElementById("ledgerSeller")?.value.trim() ||
-      localProfile.name ||
-      "";
+    const sellerSource = selectedSellerSource("ledger");
+    const seller = sellerSource.name;
     const content =
       document.getElementById("ledgerContent")?.value.trim() || "";
     const paymentType =
@@ -123,11 +168,8 @@
       showNotification("Vui lòng điền đầy đủ thông tin.", "error");
       return;
     }
-    if (!isOwnerSeller(seller)) {
-      showNotification(
-        "Giai đoạn này chỉ mở ghi phiếu của chính sổ thiên.",
-        "error"
-      );
+    if (!sellerSource.id || !seller) {
+      showNotification("Vui lòng chọn người bán / nguồn hợp lệ.", "error");
       return;
     }
 
@@ -147,12 +189,28 @@
       );
       return;
     }
+    const total = parsed.entries.reduce(
+      (sum, entry) => sum + Number(entry.amount || 0),
+      0
+    );
+    if (
+      !confirmLikelyDuplicate({
+        sourceId: sellerSource.id,
+        date,
+        session,
+        person,
+        content,
+        total,
+      })
+    ) {
+      return;
+    }
 
     setSubmitBusy(true);
     try {
       const { data, error } = await client.rpc("luu_phieu_truc_tiep", {
         p_ma_so: auth.book.ma_so,
-        p_ma_nguon: snapshot.selfSourceId,
+        p_ma_nguon: sellerSource.id,
         p_ngay_ghi: date,
         p_buoi: databaseSession(session),
         p_ten_khach: person,
@@ -176,11 +234,15 @@
       activeViewSession = session;
 
       document.getElementById("ledgerContent").value = "";
+      if (sellerSource.type === "cap_duoi_thu_cong") {
+        document.getElementById("ledgerPerson").value = "";
+      }
       document.getElementById("ledgerTotal").textContent = "0 đ";
       renderParsePreview([]);
       syncViewControls();
 
       await window.reloadConhonDatabase();
+      document.getElementById("ledgerPerson")?.focus();
       showNotification("Đã lưu phiếu vào Supabase.");
     } catch (error) {
       console.error("Không tạo được phiếu Supabase:", error);
@@ -216,10 +278,8 @@
     const session =
       document.querySelector('input[name="editSession"]:checked')?.value || "";
     const person = document.getElementById("editPerson")?.value.trim() || "";
-    const seller =
-      document.getElementById("editSeller")?.value.trim() ||
-      localProfile.name ||
-      "";
+    const sellerSource = selectedSellerSource("edit");
+    const seller = sellerSource.name;
     const content =
       document.getElementById("editContent")?.value.trim() || "";
     const paymentType =
@@ -229,11 +289,8 @@
       showNotification("Vui lòng điền đầy đủ thông tin.", "error");
       return;
     }
-    if (!isOwnerSeller(seller)) {
-      showNotification(
-        "Giai đoạn này chỉ mở sửa phiếu của chính sổ thiên.",
-        "error"
-      );
+    if (!sellerSource.id || !seller) {
+      showNotification("Vui lòng chọn người bán / nguồn hợp lệ.", "error");
       return;
     }
 
@@ -249,12 +306,29 @@
       showNotification("Nội dung sửa còn phần chưa nhận dạng.", "error");
       return;
     }
+    const total = parsed.entries.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0
+    );
+    if (
+      !confirmLikelyDuplicate({
+        sourceId: sellerSource.id,
+        date,
+        session,
+        person,
+        content,
+        total,
+        excludedEntryId: entry.id,
+      })
+    ) {
+      return;
+    }
 
     setEditBusy(true);
     try {
       const { data, error } = await client.rpc("luu_phieu_truc_tiep", {
         p_ma_so: auth.book.ma_so,
-        p_ma_nguon: snapshot.selfSourceId,
+        p_ma_nguon: sellerSource.id,
         p_ngay_ghi: date,
         p_buoi: databaseSession(session),
         p_ten_khach: person,
@@ -616,6 +690,65 @@
     }
   }
 
+  function setManualSellerBusy(busy) {
+    const button = document.getElementById("manualSellerSaveButton");
+    const input = document.getElementById("manualSellerName");
+    if (button) {
+      button.disabled = busy;
+      button.innerHTML = busy
+        ? '<i class="fas fa-circle-notch fa-spin"></i> Đang thêm'
+        : '<i class="fas fa-check"></i> Thêm và chọn';
+    }
+    if (input) input.disabled = busy;
+  }
+
+  async function saveManualSellerSource() {
+    const name = document.getElementById("manualSellerName")?.value.trim();
+    if (!name) {
+      showNotification("Vui lòng nhập tên người bán.", "error");
+      return;
+    }
+    if (name.length > 80) {
+      showNotification("Tên người bán không được vượt quá 80 ký tự.", "error");
+      return;
+    }
+
+    setManualSellerBusy(true);
+    try {
+      const { client, bookId } = databaseContext();
+      const { data, error } = await client.rpc(
+        "lay_hoac_tao_nguon_thu_cong",
+        {
+          p_ma_so: bookId,
+          p_ten_nguon: name,
+        }
+      );
+      if (error) throw error;
+      const source = Array.isArray(data) ? data[0] : data;
+      if (!source?.ma_nguon) {
+        throw new Error("Database không trả về nguồn vừa tạo.");
+      }
+
+      await reloadDatabase();
+      if (typeof refreshSellerSourceControls === "function") {
+        refreshSellerSourceControls({
+          ledgerSourceId: String(source.ma_nguon),
+        });
+      }
+      closeManualSellerModal();
+      document.getElementById("ledgerPerson")?.focus();
+      showNotification(
+        source.loai_nguon === "ban_than"
+          ? "Tên này là sổ của bạn. Đã chuyển về nguồn bản thân."
+          : `Đã chọn nguồn cấp dưới “${source.ten_nguon}”.`
+      );
+    } catch (error) {
+      showWriteError("Không thể thêm người bán cấp dưới", error);
+    } finally {
+      setManualSellerBusy(false);
+    }
+  }
+
   async function updateDatabaseSourceConfig(encodedKey, field, value) {
     const key = decodeURIComponent(encodedKey);
     const snapshot = window.conhonDatabaseSnapshot;
@@ -774,6 +907,7 @@
   window.saveDebtPayment = saveDatabaseDebtPayment;
   window.reverseDebtPayment = reverseDatabaseDebtPayment;
   window.saveFinanceSettingsFromForm = saveDatabaseFinanceSettings;
+  window.saveManualSellerSource = saveManualSellerSource;
   window.updateFinanceSourceConfig = updateDatabaseSourceConfig;
   window.saveLocalProfile = saveDatabaseProfile;
   window.importSessionSummary = importDatabaseChildSummary;

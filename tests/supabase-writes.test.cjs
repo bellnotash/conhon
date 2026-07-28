@@ -17,6 +17,7 @@ const element = (id) => {
       disabled: false,
       style: {},
       classList: { add() {}, remove() {} },
+      focus() {},
     });
   }
   return elements.get(id);
@@ -49,6 +50,18 @@ function queryBuilder(table, operation, payload) {
 const client = {
   rpc(name, args) {
     calls.push({ type: "rpc", name, args });
+    if (name === "lay_hoac_tao_nguon_thu_cong") {
+      return Promise.resolve({
+        data: [
+          {
+            ma_nguon: "source-manual",
+            ten_nguon: args.p_ten_nguon,
+            loai_nguon: "cap_duoi_thu_cong",
+          },
+        ],
+        error: null,
+      });
+    }
     return Promise.resolve({ data: "result-id", error: null });
   },
   from(table) {
@@ -155,6 +168,8 @@ const context = {
   addRecentPerson() {},
   addRecentSeller() {},
   syncViewControls() {},
+  closeManualSellerModal() {},
+  refreshSellerSourceControls() {},
   activeViewDate: "",
   activeViewDateFrom: "",
   activeViewDateTo: "",
@@ -293,6 +308,46 @@ async function run() {
   );
   assert.equal(sourceWrite.payload.ty_le_hoa_hong, 14);
 
+  element("manualSellerName").value = "Vỹ";
+  await context.window.saveManualSellerSource();
+  const manualSourceCall = calls.findLast(
+    (call) =>
+      call.type === "rpc" &&
+      call.name === "lay_hoac_tao_nguon_thu_cong"
+  );
+  assert.equal(manualSourceCall.args.p_ma_so, "book-1");
+  assert.equal(manualSourceCall.args.p_ten_nguon, "Vỹ");
+
+  context.getSelectedSellerSource = () => ({
+    id: "source-manual",
+    name: "Vỹ",
+    type: "cap_duoi_thu_cong",
+    role: "child",
+  });
+  context.parseContentDetailed = () => ({
+    entries: [{ animal: "cá", amount: 50000 }],
+    errors: [],
+  });
+  context.document.querySelector = (selector) => {
+    if (selector.includes('name="session"')) return { value: "Sáng" };
+    if (selector.includes('name="paymentType"')) return { value: "cash" };
+    return null;
+  };
+  element("ledgerDate").value = "2026-07-27";
+  element("ledgerPerson").value = "Khách A";
+  element("ledgerContent").value = "cá 50";
+  await context.window.processLedgerEntry();
+  const directEntryCall = calls.findLast(
+    (call) => call.type === "rpc" && call.name === "luu_phieu_truc_tiep"
+  );
+  assert.equal(directEntryCall.args.p_ma_nguon, "source-manual");
+  assert.equal(directEntryCall.args.p_ten_nguoi_ban, "Vỹ");
+  assert.equal(
+    element("ledgerPerson").value,
+    "",
+    "Sau khi nhập phiếu cấp dưới phải xóa tên khách để nhập phiếu kế tiếp"
+  );
+
   element("profileName").value = "thiên mới";
   await context.window.saveLocalProfile();
   const profileWrite = calls.findLast(
@@ -372,6 +427,7 @@ async function run() {
     "tra_thuong",
     "cong_no",
     "cau_hinh",
+    "nguon_thu_cong",
     "ho_so",
     "nhap_cap_duoi",
   ]));

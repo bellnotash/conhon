@@ -1497,6 +1497,29 @@ textarea.form-control { resize: vertical; min-height: 70px; }
   font-weight: 700;
   cursor: pointer;
 }
+.manual-seller-banner {
+  margin: -2px 0 13px;
+  padding: 10px 12px;
+  border: 1px solid #f1c27d;
+  border-radius: 9px;
+  color: #82551d;
+  background: #fff8e9;
+}
+.manual-seller-banner[hidden] { display: none; }
+.manual-seller-banner > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: .75rem;
+}
+.manual-seller-banner i { color: #d78a1e; }
+.manual-seller-banner small {
+  display: block;
+  margin-top: 5px;
+  color: #9b7441;
+  font-size: .64rem;
+}
+.manual-seller-modal-content { max-width: 480px; }
 .debt-filter-toolbar {
   margin-bottom: 14px;
   padding: 13px 15px;

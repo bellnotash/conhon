@@ -251,7 +251,19 @@
                       </div>
                     </div>
                     <div class="form-row"><label><i class="far fa-user"></i> Khách</label><input type="text" id="ledgerPerson" class="form-control" placeholder="Tên người mua" list="personSuggestions" autocomplete="off" /><datalist id="personSuggestions"></datalist></div>
-                    <div class="form-row"><label><i class="fas fa-store"></i> Người bán</label><div class="seller-input-wrap"><input type="text" id="ledgerSeller" class="form-control" placeholder="Tên người bán" list="sellerSuggestions" autocomplete="off" /><button type="button" onclick="useCurrentProfileAsSeller()" title="Đặt về người bán hiện tại"><i class="fas fa-user-check"></i> Tôi</button></div><datalist id="sellerSuggestions"></datalist></div>
+                    <div class="form-row">
+                      <label><i class="fas fa-store"></i> Người bán / nguồn</label>
+                      <div class="seller-input-wrap">
+                        <select id="ledgerSellerSource" class="form-control" onchange="handleLedgerSellerSourceChange()"><option value="">Đang tải nguồn…</option></select>
+                        <button type="button" onclick="openManualSellerModal()" title="Thêm người bán cấp dưới"><i class="fas fa-user-plus"></i><span>Thêm</span></button>
+                        <button type="button" onclick="useCurrentProfileAsSeller()" title="Chuyển về sổ của tôi"><i class="fas fa-user-check"></i><span>Tôi</span></button>
+                      </div>
+                      <input type="hidden" id="ledgerSeller" />
+                    </div>
+                    <div id="manualSellerBanner" class="manual-seller-banner" hidden aria-live="polite">
+                      <div><i class="fas fa-people-arrows"></i><span>Đang nhập sổ cho <strong id="manualSellerBannerName"></strong></span></div>
+                      <small id="manualSellerBatchSummary">0 phiếu · 0 đ trong ngày/buổi đang chọn</small>
+                    </div>
                     <div class="form-row">
                       <label><i class="far fa-edit"></i> Nội dung</label>
                       <textarea id="ledgerContent" class="form-control" rows="3" placeholder="VD: lân 50 chó 50, ong 50"></textarea>
@@ -467,11 +479,22 @@
           <div class="form-row"><label><i class="far fa-calendar-alt"></i> Ngày</label><input type="date" id="editDate" class="form-control" /></div>
           <div class="form-row"><label><i class="far fa-clock"></i> Buổi</label><div class="session-selector"><label class="session-chip"><input type="radio" name="editSession" value="Sáng" checked /><span><i class="fas fa-sun"></i> Sáng</span></label><label class="session-chip"><input type="radio" name="editSession" value="Chiều" /><span><i class="fas fa-moon"></i> Chiều</span></label></div></div>
           <div class="form-row"><label><i class="far fa-user"></i> Khách</label><input type="text" id="editPerson" class="form-control" placeholder="Tên người mua" /></div>
-          <div class="form-row"><label><i class="fas fa-store"></i> Người bán</label><input type="text" id="editSeller" class="form-control" placeholder="Tên người bán" /></div>
+          <div class="form-row"><label><i class="fas fa-store"></i> Người bán / nguồn</label><select id="editSellerSource" class="form-control" onchange="handleEditSellerSourceChange()"><option value="">Đang tải nguồn…</option></select><input type="hidden" id="editSeller" /></div>
           <div class="form-row"><label><i class="far fa-edit"></i> Nội dung</label><textarea id="editContent" class="form-control" rows="3" placeholder="VD: chó 50 lân 50"></textarea></div>
           <div class="form-row"><label><i class="fas fa-wallet"></i> Thanh toán</label><select id="editPaymentType" class="form-control"><option value="cash">Tiền mặt</option><option value="bank_transfer">Chuyển khoản</option><option value="debt">Nợ</option><option value="unknown">Chưa xác định</option></select></div>
         </div>
         <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeEditModal()"><i class="fas fa-times"></i> Hủy</button><button id="editSaveButton" class="btn-modal btn-modal-save database-write-enabled" onclick="saveEditedEntry()"><i class="fas fa-save"></i> Lưu thay đổi</button></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="manualSellerModal">
+      <div class="modal-content manual-seller-modal-content">
+        <div class="modal-header"><h3><i class="fas fa-user-plus"></i> Thêm người bán cấp dưới</h3><button class="modal-close" onclick="closeManualSellerModal()">&times;</button></div>
+        <div class="modal-body">
+          <p class="profile-help">Dùng cho người không sử dụng hệ thống và gửi sổ tay để bạn nhập từng phiếu. Tên này sẽ trở thành một nguồn riêng trong doanh thu, hoa hồng và công nợ.</p>
+          <div class="form-row"><label for="manualSellerName"><i class="fas fa-signature"></i> Tên người bán</label><input type="text" id="manualSellerName" class="form-control" maxlength="80" autocomplete="off" placeholder="VD: Vỹ" /></div>
+        </div>
+        <div class="modal-footer"><button class="btn-modal btn-modal-cancel" onclick="closeManualSellerModal()">Hủy</button><button id="manualSellerSaveButton" class="btn-modal btn-modal-save database-write-enabled" onclick="saveManualSellerSource()"><i class="fas fa-check"></i> Thêm và chọn</button></div>
       </div>
     </div>
 

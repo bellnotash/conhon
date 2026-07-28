@@ -226,6 +226,132 @@ function updateSellerSuggestions() {
     .join("");
 }
 
+function getWritableSellerSources() {
+  const sources = window.conhonDatabaseSnapshot?.sources || [];
+  return sources.filter(
+    (source) =>
+      source.dang_hoat_dong !== false &&
+      ["ban_than", "cap_duoi_thu_cong"].includes(source.loai_nguon)
+  );
+}
+
+function getSellerSourceById(sourceId) {
+  return getWritableSellerSources().find(
+    (source) =>
+      String(source.ma_nguon) === String(sourceId || "") ||
+      (source.ma_ho_so_ngoai &&
+        String(source.ma_ho_so_ngoai) === String(sourceId || ""))
+  );
+}
+
+function sellerSourceOptionLabel(source) {
+  return source.loai_nguon === "ban_than"
+    ? `${source.ten_nguon} (Bản thân)`
+    : `${source.ten_nguon} (Cấp dưới nhập tay)`;
+}
+
+function populateSellerSourceSelect(selectId, selectedId) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const sources = getWritableSellerSources();
+  const selfSourceId = String(
+    window.conhonDatabaseSnapshot?.selfSourceId || ""
+  );
+  const desiredId = String(selectedId || select.value || selfSourceId);
+  const desiredSource = getSellerSourceById(desiredId);
+  select.innerHTML = sources.length
+    ? sources
+        .map(
+          (source) =>
+            `<option value="${escapeHtml(String(source.ma_nguon))}">${escapeHtml(
+              sellerSourceOptionLabel(source)
+            )}</option>`
+        )
+        .join("")
+    : '<option value="">Chưa có nguồn có thể ghi</option>';
+  select.value = desiredSource
+    ? String(desiredSource.ma_nguon)
+    : selfSourceId;
+}
+
+function getSelectedSellerSource(scope = "ledger") {
+  const selectId =
+    scope === "edit" ? "editSellerSource" : "ledgerSellerSource";
+  const select = document.getElementById(selectId);
+  const source =
+    getSellerSourceById(select?.value) ||
+    getSellerSourceById(window.conhonDatabaseSnapshot?.selfSourceId);
+  if (!source) return null;
+  return {
+    id: String(source.ma_nguon),
+    name: source.ten_nguon || "",
+    type: source.loai_nguon,
+    aliases: [source.ma_nguon, source.ma_ho_so_ngoai]
+      .filter(Boolean)
+      .map(String),
+    role:
+      source.vai_tro_tai_chinh === "ban_than" ? "self" : "child",
+  };
+}
+
+function updateManualSellerBatchSummary() {
+  const banner = document.getElementById("manualSellerBanner");
+  const name = document.getElementById("manualSellerBannerName");
+  const summary = document.getElementById("manualSellerBatchSummary");
+  if (!banner || !name || !summary) return;
+
+  const source = getSelectedSellerSource("ledger");
+  const isManual = source?.type === "cap_duoi_thu_cong";
+  banner.hidden = !isManual;
+  if (!isManual) return;
+
+  const date = document.getElementById("ledgerDate")?.value || activeViewDate;
+  const session =
+    document.querySelector('input[name="session"]:checked')?.value ||
+    activeViewSession;
+  const entries = ledgerData.filter(
+    (entry) =>
+      isDirectEntry(entry) &&
+      entry.date === date &&
+      entry.session === session &&
+      source.aliases.includes(String(entry.sellerSourceId || ""))
+  );
+  const total = entries.reduce(
+    (sum, entry) => sum + Number(entry.total || 0),
+    0
+  );
+  name.textContent = source.name;
+  summary.textContent = `${entries.length.toLocaleString(
+    "vi-VN"
+  )} phiếu · ${total.toLocaleString("vi-VN")} đ trong ngày/buổi đang chọn`;
+}
+
+function handleLedgerSellerSourceChange() {
+  const source = getSelectedSellerSource("ledger");
+  const hiddenInput = document.getElementById("ledgerSeller");
+  if (hiddenInput) hiddenInput.value = source?.name || "";
+  updateManualSellerBatchSummary();
+}
+
+function handleEditSellerSourceChange() {
+  const source = getSelectedSellerSource("edit");
+  const hiddenInput = document.getElementById("editSeller");
+  if (hiddenInput) hiddenInput.value = source?.name || "";
+}
+
+function refreshSellerSourceControls(options = {}) {
+  const selectedLedgerId =
+    options.ledgerSourceId ||
+    document.getElementById("ledgerSellerSource")?.value;
+  const selectedEditId =
+    options.editSourceId ||
+    document.getElementById("editSellerSource")?.value;
+  populateSellerSourceSelect("ledgerSellerSource", selectedLedgerId);
+  populateSellerSourceSelect("editSellerSource", selectedEditId);
+  handleLedgerSellerSourceChange();
+  handleEditSellerSourceChange();
+}
+
 // ===== DỮ LIỆU GHI SỔ CÓ CẤU TRÚC =====
 let ledgerData = [];
 let nextEntryId = 1;
@@ -289,18 +415,36 @@ function applySellerIdentity(entry, sellerName) {
 }
 
 function useCurrentProfileAsSeller() {
-  const input = document.getElementById("ledgerSeller");
-  if (!input) return;
-  input.value = localProfile.name || "";
-  input.focus();
+  const select = document.getElementById("ledgerSellerSource");
+  if (!select) return;
+  select.value = String(window.conhonDatabaseSnapshot?.selfSourceId || "");
+  handleLedgerSellerSourceChange();
+  select.focus();
 }
 
 function initializeDefaultSeller(force = false) {
-  const input = document.getElementById("ledgerSeller");
-  if (!input) return;
-  if (force || !input.value.trim()) {
-    input.value = localProfile.name || "";
+  const select = document.getElementById("ledgerSellerSource");
+  if (!select) return;
+  if (force || !getSellerSourceById(select.value)) {
+    populateSellerSourceSelect(
+      "ledgerSellerSource",
+      window.conhonDatabaseSnapshot?.selfSourceId
+    );
   }
+  handleLedgerSellerSourceChange();
+}
+
+function openManualSellerModal() {
+  const modal = document.getElementById("manualSellerModal");
+  const input = document.getElementById("manualSellerName");
+  if (!modal || !input) return;
+  input.value = "";
+  modal.classList.add("show");
+  setTimeout(() => input.focus(), 0);
+}
+
+function closeManualSellerModal() {
+  document.getElementById("manualSellerModal")?.classList.remove("show");
 }
 
 function findEntryById(entryId) {
@@ -1033,7 +1177,8 @@ function openEditModal(entryId) {
   document.getElementById("editEntryId").value = entryId;
   document.getElementById("editDate").value = entry.date;
   document.getElementById("editPerson").value = entry.person;
-  document.getElementById("editSeller").value = entry.seller || "";
+  populateSellerSourceSelect("editSellerSource", entry.sellerSourceId);
+  handleEditSellerSourceChange();
   document.getElementById("editContent").value = entry.content;
   document.getElementById("editPaymentType").value = entry.paymentType || "unknown";
 
@@ -4207,6 +4352,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // Cập nhật gợi ý người ghi + người bán
   updatePersonSuggestions();
   updateSellerSuggestions();
+  document
+    .getElementById("ledgerDate")
+    ?.addEventListener("change", updateManualSellerBatchSummary);
+  document
+    .querySelectorAll('input[name="session"]')
+    .forEach((radio) =>
+      radio.addEventListener("change", updateManualSellerBatchSummary)
+    );
 
   // Khởi tạo dropdown con vật cho tra cứu xổ
   populateWinAnimalSelect();
@@ -4260,6 +4413,17 @@ document.addEventListener("DOMContentLoaded", () => {
       searchInput.focus();
       searchInput.select();
     }
+    // Ctrl+Enter: lưu nhanh phiếu và chuyển sang phiếu tiếp theo.
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.key === "Enter" &&
+      getCurrentRoute() === "ledger-entry" &&
+      !document.querySelector(".modal-overlay.show") &&
+      !document.getElementById("ledgerSubmitButton")?.disabled
+    ) {
+      e.preventDefault();
+      processLedgerEntry();
+    }
     // Ctrl+Z: undo (khi không đang focus input/textarea)
     if (
       (e.ctrlKey || e.metaKey) &&
@@ -4279,6 +4443,19 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
   });
+
+  document
+    .getElementById("manualSellerName")
+    ?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      saveManualSellerSource();
+    });
+});
+
+window.addEventListener("conhon:database-loaded", () => {
+  refreshSellerSourceControls();
+  updateManualSellerBatchSummary();
 });
 
 // Thêm hàm xuất lịch sử
