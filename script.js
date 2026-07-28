@@ -596,6 +596,15 @@ function refreshActiveView(route = getCurrentRoute()) {
 
 // Giữ tên cũ để các luồng thao tác hiện tại chỉ làm mới màn hình đang mở.
 function refreshAllViews() {
+  if (
+    typeof window.ensureConhonDatabaseRange === "function" &&
+    window.ensureConhonDatabaseRange(
+      activeViewDateFrom,
+      activeViewDateTo
+    )
+  ) {
+    return;
+  }
   refreshActiveView();
 }
 
@@ -2280,6 +2289,15 @@ function showRoute(route) {
     }
     syncViewControls();
   }
+  if (
+    typeof window.ensureConhonDatabaseRange === "function" &&
+    window.ensureConhonDatabaseRange(
+      activeViewDateFrom,
+      activeViewDateTo
+    )
+  ) {
+    return;
+  }
   refreshActiveView(validRoute);
 }
 
@@ -3881,9 +3899,12 @@ function updateStorageUsage() {
     return;
   }
   const counts = snapshot.counts || {};
-  element.textContent = `Supabase: ${Number(counts.entries || 0).toLocaleString(
+  const visibleCount = Number(
+    counts.rangeEntries ?? counts.entries ?? 0
+  );
+  element.textContent = `Supabase: ${visibleCount.toLocaleString(
     "vi-VN"
-  )} phiếu · ${Number(counts.details || 0).toLocaleString("vi-VN")} chi tiết`;
+  )} phiếu trong khoảng`;
   element.classList.remove("storage-warning", "storage-danger");
 }
 
@@ -4382,36 +4403,45 @@ function clearAllData() {
 }
 
 // ===== SAO LƯU & KHÔI PHỤC =====
-function exportBackup() {
+async function exportBackup() {
   const snapshot = window.conhonDatabaseSnapshot;
-  if (!window.conhonDatabaseReady || !snapshot) {
+  if (
+    !window.conhonDatabaseReady ||
+    !snapshot ||
+    typeof window.getConhonFullDatabaseBackup !== "function"
+  ) {
     showNotification("Dữ liệu Supabase chưa tải xong.", "error");
     return;
   }
-  const exportedAt = new Date();
-  const data = {
-    version: DATA_VERSION,
-    ledgerData: JSON.parse(JSON.stringify(ledgerData)),
-    paidEntries: JSON.parse(JSON.stringify(paidEntries)),
-    drawResults: JSON.parse(JSON.stringify(drawResults)),
-    payoutStates: JSON.parse(JSON.stringify(payoutStates)),
-    debtPayments: JSON.parse(JSON.stringify(debtPayments)),
-    financeSettings: JSON.parse(JSON.stringify(financeSettings)),
-    _backupDate: exportedAt.toLocaleString("vi-VN"),
-    _exportedAt: exportedAt.toISOString(),
-    _version: `conhon-supabase-v${DATA_VERSION}`,
-    _type: "conhon-supabase-backup",
-    _profile: JSON.parse(JSON.stringify(localProfile)),
-    _database: {
-      bookId: snapshot.book?.ma_so || "",
-      counts: JSON.parse(JSON.stringify(snapshot.counts || {})),
-    },
-  };
-  const dateStr = exportedAt.toISOString().slice(0, 10);
-  downloadJson(data, `conhon-supabase-backup-${dateStr}.json`);
-  showNotification(
-    `Đã sao lưu ${ledgerData.length.toLocaleString("vi-VN")} phiếu từ Supabase.`
-  );
+  toggleLoading(true);
+  try {
+    const exportedAt = new Date();
+    const database = await window.getConhonFullDatabaseBackup();
+    const data = {
+      version: DATA_VERSION,
+      _backupDate: exportedAt.toLocaleString("vi-VN"),
+      _exportedAt: exportedAt.toISOString(),
+      _version: `conhon-supabase-v${DATA_VERSION}`,
+      _type: "conhon-supabase-backup",
+      _profile: JSON.parse(JSON.stringify(localProfile)),
+      database,
+    };
+    const dateStr = exportedAt.toISOString().slice(0, 10);
+    downloadJson(data, `conhon-supabase-backup-${dateStr}.json`);
+    showNotification(
+      `Đã sao lưu ${database.phieu_ghi.length.toLocaleString(
+        "vi-VN"
+      )} phiếu từ Supabase.`
+    );
+  } catch (error) {
+    console.error("Không thể sao lưu Supabase:", error);
+    showNotification(
+      `Không thể sao lưu Supabase: ${error?.message || "Lỗi không xác định"}`,
+      "error"
+    );
+  } finally {
+    toggleLoading(false);
+  }
 }
 
 function importBackup(event) {
