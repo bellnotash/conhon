@@ -3859,7 +3859,10 @@ function updateFinanceDashboard(route = getCurrentRoute()) {
     .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
   const cash = saleCash + debtCash;
   const transfer = saleTransfer + debtTransfer;
-  const debtEntries = getDebtEntriesAsOf(activeViewDateTo);
+  const debtEntries = getDebtEntriesInRange(
+    activeViewDateFrom,
+    activeViewDateTo
+  );
   const debt = debtEntries.reduce(
     (sum, entry) =>
       sum + getDebtSnapshot(entry, activeViewDateTo).remaining,
