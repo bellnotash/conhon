@@ -209,6 +209,12 @@ body {
   cursor: wait;
   opacity: .7;
 }
+.database-unavailable .database-write-enabled,
+.database-unavailable .danger-action {
+  pointer-events: none;
+  cursor: not-allowed;
+  opacity: .55;
+}
 .database-readonly .erp-sidebar-footer {
   color: #b9d9ff;
 }

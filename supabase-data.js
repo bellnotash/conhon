@@ -4,6 +4,7 @@
   const PAGE_SIZE = 1000;
   let loadingBookId = null;
   let loadedBookId = null;
+  window.conhonDatabaseReady = false;
 
   const paymentToLocal = {
     tien_mat: "cash",
@@ -118,7 +119,6 @@
 
     const importInputs = [
       document.getElementById("summaryImportInput"),
-      document.getElementById("importFileInput"),
     ];
     importInputs.forEach((input) => {
       if (input) input.disabled = true;
@@ -167,6 +167,8 @@
       return;
     }
     loadingBookId = book.ma_so;
+    window.conhonDatabaseReady = false;
+    document.body.classList.add("database-unavailable");
 
     toggleLoading(true);
     try {
@@ -413,6 +415,8 @@
         ),
       };
       loadedBookId = bookId;
+      window.conhonDatabaseReady = true;
+      document.body.classList.remove("database-unavailable");
       window.dispatchEvent(
         new CustomEvent("conhon:database-loaded", {
           detail: window.conhonDatabaseSnapshot,
@@ -425,13 +429,23 @@
         )} phiếu từ Supabase.`
       );
     } catch (error) {
+      window.conhonDatabaseReady = false;
+      window.conhonDatabaseSnapshot = null;
+      document.body.classList.add("database-unavailable");
+      ledgerData = [];
+      paidEntries = {};
+      drawResults = {};
+      payoutStates = {};
+      debtPayments = [];
+      rebuildDataIndexes();
+      refreshAllViews();
       console.error("Không tải được dữ liệu Supabase:", error);
       const sidebarStatus = document.getElementById(
         "databaseConnectionStatus"
       );
       if (sidebarStatus) {
         sidebarStatus.innerHTML =
-          '<i class="fas fa-triangle-exclamation"></i><span>Lỗi tải Supabase · đang dùng dữ liệu cục bộ</span>';
+          '<i class="fas fa-triangle-exclamation"></i><span>Lỗi tải Supabase · không có dữ liệu cục bộ thay thế</span>';
       }
       showNotification(
         `Không tải được dữ liệu Supabase: ${

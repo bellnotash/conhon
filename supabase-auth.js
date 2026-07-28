@@ -93,7 +93,6 @@
       throw new Error("Tài khoản chưa được gán vào sổ nào.");
     }
     state.book = data;
-    localStorage.setItem("coNhonConnectedBook", JSON.stringify(data));
   }
 
   async function applySession(session) {
@@ -102,7 +101,6 @@
     state.book = null;
 
     if (!state.user) {
-      localStorage.removeItem("coNhonConnectedBook");
       getElement("authLogoutButton")?.setAttribute("hidden", "");
       showLogin();
       return;

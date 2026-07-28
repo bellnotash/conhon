@@ -183,7 +183,6 @@ function performUndo() {
   }
   markDataChanged();
   refreshAllViews();
-  saveDataToLocalStorage();
   updateUndoButton();
 }
 
@@ -256,15 +255,7 @@ function createUuid() {
 }
 
 function loadLocalProfile() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("coNhonProfile") || "null");
-    if (saved?.id) return saved;
-  } catch (error) {
-    console.warn("Không đọc được hồ sơ sổ:", error);
-  }
-  const profile = { id: createUuid(), name: "" };
-  localStorage.setItem("coNhonProfile", JSON.stringify(profile));
-  return profile;
+  return { id: "", name: "" };
 }
 
 let localProfile = loadLocalProfile();
@@ -678,7 +669,6 @@ function processLedgerEntry() {
 
   // Lưu + badge
   refreshAllViews();
-  saveDataToLocalStorage();
   updateLastUpdateBadge();
 
   showNotification("Đã ghi sổ thành công!");
@@ -1110,7 +1100,6 @@ function saveEditedEntry() {
 
   markDataChanged();
   refreshAllViews();
-  saveDataToLocalStorage();
   closeEditModal();
   showNotification("Đã cập nhật ghi sổ!");
 }
@@ -1151,7 +1140,6 @@ function deleteLedgerEntry(entryId) {
 
   markDataChanged();
   refreshAllViews();
-  saveDataToLocalStorage();
   showNotification("Đã xóa mục ghi sổ!");
 }
 
@@ -1436,8 +1424,6 @@ function legacyTogglePaidStatus(entryId) {
   } else {
     paidEntries[entryId] = true;
   }
-  saveDataToLocalStorage();
-
   // Cập nhật UI cho item
   const itemEl = document.querySelector(`.win-item[data-entry-id="${entryId}"]`);
   if (itemEl) {
@@ -1747,7 +1733,6 @@ function confirmWinningAnimal() {
   };
   document.getElementById("winAnimal").value = String(animalIndex);
   search.value = getAnimalSearchLabel(animalIndex);
-  saveDataToLocalStorage();
   renderWinConfirmation(draw, animalIndex, true);
   filterWinningEntries(false);
   updateFinanceDashboard();
@@ -2042,7 +2027,6 @@ function updatePayoutRate(entryId, value) {
   }
   state.rate = rate;
   state.rateMode = "manual";
-  saveDataToLocalStorage();
   filterWinningEntries(false);
   updateFinanceDashboard();
 }
@@ -2075,7 +2059,6 @@ function togglePaidStatus(entryId) {
         Number(state.rate)
       )
     : null;
-  saveDataToLocalStorage();
   filterWinningEntries(false);
   showNotification(
     state.paid ? "Đã đánh dấu đã chung!" : "Đã chuyển về chưa chung!"
@@ -2992,7 +2975,6 @@ function saveFinanceSettingsFromForm() {
   financeSettings.defaultChildRate = childRate;
   financeSettings.ownerPayoutRate = ownerPayoutRate;
   financeSettings.defaultPayoutRate = payoutRate;
-  saveDataToLocalStorage();
   refreshAllViews();
   showNotification("Đã lưu cấu hình hệ số và hoa hồng!");
 }
@@ -3025,7 +3007,6 @@ function updateFinanceSourceConfig(encodedKey, field, value) {
     current.childRate = childRate;
   }
   financeSettings.sourceConfigs[key] = current;
-  saveDataToLocalStorage();
   updateFinanceDashboard();
 }
 
@@ -3379,7 +3360,6 @@ function saveDebtPayment() {
     reversedAt: null,
   });
   markDataChanged();
-  saveDataToLocalStorage();
   refreshAllViews();
   renderDebtPaymentModal(entry);
   document.getElementById("debtPaymentAmount").value =
@@ -3399,7 +3379,6 @@ function reverseDebtPayment(paymentId) {
   if (!confirm("Hủy lần thu nợ này và cộng lại công nợ cho khách?")) return;
   payment.reversedAt = new Date().toISOString();
   markDataChanged();
-  saveDataToLocalStorage();
   refreshAllViews();
   const entry = findEntryById(payment.entryId);
   if (entry) {
@@ -3895,17 +3874,17 @@ function updateExportSummaryPreview() {
 function updateStorageUsage() {
   const element = document.getElementById("storageUsage");
   if (!element) return;
-  const raw = localStorage.getItem("coNhonData") || "";
-  const bytes = new Blob([raw]).size;
-  const maxBytes = 5 * 1024 * 1024;
-  const percent = Math.min(100, (bytes / maxBytes) * 100);
-  const sizeLabel =
-    bytes >= 1024 * 1024
-      ? `${(bytes / 1024 / 1024).toFixed(2)} MB`
-      : `${Math.ceil(bytes / 1024)} KB`;
-  element.textContent = `Dữ liệu: ${sizeLabel} (${percent.toFixed(1)}%)`;
-  element.classList.toggle("storage-warning", percent >= 70 && percent < 90);
-  element.classList.toggle("storage-danger", percent >= 90);
+  const snapshot = window.conhonDatabaseSnapshot;
+  if (!snapshot) {
+    element.textContent = "Supabase: đang kết nối";
+    element.classList.remove("storage-warning", "storage-danger");
+    return;
+  }
+  const counts = snapshot.counts || {};
+  element.textContent = `Supabase: ${Number(counts.entries || 0).toLocaleString(
+    "vi-VN"
+  )} phiếu · ${Number(counts.details || 0).toLocaleString("vi-VN")} chi tiết`;
+  element.classList.remove("storage-warning", "storage-danger");
 }
 
 function openProfileModal() {
@@ -3934,7 +3913,6 @@ function saveLocalProfile() {
   }
   const previousName = localProfile.name || "";
   localProfile.name = name;
-  localStorage.setItem("coNhonProfile", JSON.stringify(localProfile));
   const sellerInput = document.getElementById("ledgerSeller");
   if (
     sellerInput &&
@@ -4171,7 +4149,6 @@ function importSessionSummary(event) {
       activeViewSession = data.session;
       syncViewControls();
       refreshAllViews();
-      saveDataToLocalStorage();
       showNotification(existing ? "Đã cập nhật phiếu cấp dưới!" : "Đã nhập phiếu cấp dưới!");
     } catch (error) {
       showNotification(`Không thể nhập: ${error.message}`, "error");
@@ -4193,8 +4170,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Set ngày mặc định là ngày hiện tại
   document.getElementById("ledgerDate").value = getCurrentDate();
 
-  // Tải dữ liệu đã lưu
-  loadDataFromLocalStorage();
+  // Dữ liệu nghiệp vụ chỉ được tải từ Supabase sau khi đăng nhập.
+  rebuildDataIndexes();
+  refreshAllViews();
   initializeDefaultSeller();
 
   // Khởi tạo search index
@@ -4396,282 +4374,52 @@ async function exportHistory() {
   }
 }
 
-// Thêm các hàm để lưu và tải dữ liệu
-function saveDataToLocalStorage() {
-  const data = {
-    version: DATA_VERSION,
-    ledgerData: ledgerData,
-    paidEntries: paidEntries,
-    drawResults: drawResults,
-    payoutStates: payoutStates,
-    debtPayments: debtPayments,
-    financeSettings: financeSettings,
-    lastUpdate: new Date().toLocaleString("vi-VN"),
-  };
-  try {
-    localStorage.setItem("coNhonData", JSON.stringify(data));
-    updateLastUpdateBadge();
-    updateStorageUsage();
-  } catch (error) {
-    if (error?.name === "QuotaExceededError") {
-      showNotification("Bộ nhớ trình duyệt đã đầy. Hãy xuất sao lưu và dọn dữ liệu cũ!", "error");
-    } else {
-      showNotification("Không thể lưu dữ liệu vào trình duyệt!", "error");
-    }
-    throw error;
-  }
-}
-
-function normalizeLedgerEntry(entry) {
-  const normalizedItems = Array.isArray(entry.entries)
-    ? entry.entries
-        .map((item) => ({
-          animal: item.animal,
-          amount: Number(item.amount) || 0,
-        }))
-        .filter(
-          (item) =>
-            item.amount > 0 && animalNameToIndex[item.animal] !== undefined
-        )
-    : parseContent(entry.content || "");
-  const calculatedTotal = normalizedItems.reduce(
-    (sum, item) => sum + item.amount,
-    0
-  );
-  const sellerIdentity = getSellerIdentity(entry.seller || "");
-  return {
-    ...entry,
-    id: entry.id ?? createUuid(),
-    date: entry.date || getCurrentDate(),
-    session: entry.session === "Chiều" ? "Chiều" : "Sáng",
-    person: entry.person || "",
-    seller: entry.seller || "",
-    sellerSourceId:
-      entry.sellerSourceId ||
-      (entry.entryType === "child_summary"
-        ? entry.sourceProfileId || ""
-        : sellerIdentity.sellerSourceId),
-    sellerRole:
-      entry.sellerRole ||
-      (entry.entryType === "child_summary"
-        ? "child"
-        : sellerIdentity.sellerRole),
-    content: entry.content || formatEntryAsText({ entries: normalizedItems }),
-    total: calculatedTotal || Number(entry.total) || 0,
-    entries: normalizedItems,
-    paymentType:
-      entry.entryType === "child_summary"
-        ? null
-        : entry.paymentType || "unknown",
-    entryType: entry.entryType || "direct",
-    createdAt: entry.createdAt || new Date().toISOString(),
-    updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
-  };
-}
-
-function loadDataFromLocalStorage() {
-  const savedData = localStorage.getItem("coNhonData");
-  if (!savedData) {
-    rebuildDataIndexes();
-    refreshAllViews();
-    return;
-  }
-  try {
-    const data = JSON.parse(savedData);
-    paidEntries = data.paidEntries || {};
-    drawResults = data.drawResults || {};
-    payoutStates = data.payoutStates || {};
-    debtPayments = Array.isArray(data.debtPayments)
-      ? data.debtPayments
-          .map((payment) => ({
-            ...payment,
-            id: payment.id || createUuid(),
-            entryId: payment.entryId,
-            amount: Number(payment.amount) || 0,
-            paidDate: payment.paidDate || getCurrentDate(),
-            method:
-              payment.method === "bank_transfer"
-                ? "bank_transfer"
-                : "cash",
-            note: payment.note || "",
-            createdAt: payment.createdAt || new Date().toISOString(),
-            reversedAt: payment.reversedAt || null,
-          }))
-          .filter((payment) => payment.entryId && payment.amount > 0)
-      : [];
-    const savedFinanceSettings = data.financeSettings || {};
-    const ownerRate = normalizeCommissionRate(
-      savedFinanceSettings.ownerRate,
-      20
-    );
-    const ownerPayoutRate = normalizePayoutRate(
-      savedFinanceSettings.ownerPayoutRate,
-      28
-    );
-    financeSettings = {
-      ownerRate,
-      defaultChildRate: Math.min(
-        ownerRate,
-        normalizeCommissionRate(savedFinanceSettings.defaultChildRate, 15)
-      ),
-      ownerPayoutRate,
-      defaultPayoutRate: Math.min(
-        ownerPayoutRate,
-        normalizePayoutRate(
-          savedFinanceSettings.defaultPayoutRate ??
-            savedFinanceSettings.defaultChildPayoutRate,
-          27
-        )
-      ),
-      sourceConfigs:
-        savedFinanceSettings.sourceConfigs &&
-        typeof savedFinanceSettings.sourceConfigs === "object"
-          ? savedFinanceSettings.sourceConfigs
-          : {},
-    };
-
-    if (Array.isArray(data.ledgerData)) {
-      ledgerData = data.ledgerData.map(normalizeLedgerEntry);
-    } else if (data.ledgerEntries) {
-      migrateLedgerEntries(data.ledgerEntries);
-      ledgerData = ledgerData.map(normalizeLedgerEntry);
-    }
-
-    rebuildDataIndexes();
-    refreshAllViews();
-    const badge = document.getElementById("lastUpdateBadge");
-    if (badge && data.lastUpdate) {
-      badge.textContent = `Cập nhật: ${data.lastUpdate}`;
-    }
-    console.log(`Đã tải dữ liệu (Cập nhật lần cuối: ${data.lastUpdate})`);
-  } catch (error) {
-    console.error("Không thể tải dữ liệu:", error);
-    showNotification("Dữ liệu trình duyệt bị lỗi. Hãy khôi phục từ file sao lưu!", "error");
-    refreshAllViews();
-  }
-}
-
-// Migration: chuyển từ innerHTML cũ sang cấu trúc mới
-function migrateLedgerEntries(html) {
-  const temp = document.createElement("div");
-  temp.innerHTML = html;
-  const entries = temp.querySelectorAll(".ledger-entry");
-
-  entries.forEach((el) => {
-    const dateEl = el.querySelector(".ledger-entry-date");
-    const sessionEl = el.querySelector(".ledger-entry-session");
-    const personEl = el.querySelector(".ledger-entry-person");
-    const contentEl = el.querySelector(".ledger-entry-content");
-    const totalEl = el.querySelector(".ledger-entry-total");
-
-    if (!dateEl || !sessionEl || !personEl || !contentEl || !totalEl) return;
-
-    const date = dateEl.textContent.trim();
-    const session = sessionEl.textContent.trim();
-    const person = personEl.textContent.trim();
-    const content = contentEl.textContent.trim();
-    const totalText = totalEl.textContent.replace("Tổng cộng:", "").replace("đ", "").replace(/\./g, "").replace(/,/g, "").trim();
-    const total = parseInt(totalText) || 0;
-
-    const parsedEntries = parseContent(content);
-
-    ledgerData.push({
-      id: nextEntryId++,
-      date,
-      session,
-      person,
-      seller: "",
-      content,
-      total,
-      entries: parsedEntries,
-      createdAt: new Date().toISOString(),
-    });
-  });
-}
-
-// Thêm nút xóa dữ liệu
 function clearAllData() {
-  if (confirm("Bạn có chắc muốn xóa tất cả dữ liệu không?")) {
-    try {
-      toggleLoading(true);
-      localStorage.removeItem("coNhonData");
-      showNotification("Đã xóa tất cả dữ liệu!");
-      setTimeout(() => location.reload(), 1000);
-    } catch (error) {
-      showNotification("Có lỗi xảy ra khi xóa dữ liệu!", "error");
-      toggleLoading(false);
-    }
-  }
+  showNotification(
+    "Không thể xóa dữ liệu Supabase bằng thao tác cục bộ.",
+    "error"
+  );
 }
 
 // ===== SAO LƯU & KHÔI PHỤC =====
 function exportBackup() {
-  const raw = localStorage.getItem('coNhonData');
-  if (!raw) {
-    showNotification('Không có dữ liệu để xuất!', 'error');
+  const snapshot = window.conhonDatabaseSnapshot;
+  if (!window.conhonDatabaseReady || !snapshot) {
+    showNotification("Dữ liệu Supabase chưa tải xong.", "error");
     return;
   }
-  const data = JSON.parse(raw);
-  data._backupDate = new Date().toLocaleString('vi-VN');
-  data._version = `conhon-2026-v${DATA_VERSION}`;
-  data._type = "conhon-full-backup";
-  data._profile = localProfile;
-  const dateStr = new Date().toISOString().slice(0, 10);
-  downloadJson(data, `conhon-backup-${dateStr}.json`);
-  showNotification(`Đã xuất file sao lưu! (${ledgerData.length} phiếu)`);
+  const exportedAt = new Date();
+  const data = {
+    version: DATA_VERSION,
+    ledgerData: JSON.parse(JSON.stringify(ledgerData)),
+    paidEntries: JSON.parse(JSON.stringify(paidEntries)),
+    drawResults: JSON.parse(JSON.stringify(drawResults)),
+    payoutStates: JSON.parse(JSON.stringify(payoutStates)),
+    debtPayments: JSON.parse(JSON.stringify(debtPayments)),
+    financeSettings: JSON.parse(JSON.stringify(financeSettings)),
+    _backupDate: exportedAt.toLocaleString("vi-VN"),
+    _exportedAt: exportedAt.toISOString(),
+    _version: `conhon-supabase-v${DATA_VERSION}`,
+    _type: "conhon-supabase-backup",
+    _profile: JSON.parse(JSON.stringify(localProfile)),
+    _database: {
+      bookId: snapshot.book?.ma_so || "",
+      counts: JSON.parse(JSON.stringify(snapshot.counts || {})),
+    },
+  };
+  const dateStr = exportedAt.toISOString().slice(0, 10);
+  downloadJson(data, `conhon-supabase-backup-${dateStr}.json`);
+  showNotification(
+    `Đã sao lưu ${ledgerData.length.toLocaleString("vi-VN")} phiếu từ Supabase.`
+  );
 }
 
 function importBackup(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  // Reset input để có thể chọn lại cùng file
-  event.target.value = '';
-
-  const reader = new FileReader();
-  reader.onload = function (e) {
-    try {
-      const data = JSON.parse(e.target.result);
-
-      // Kiểm tra dữ liệu hợp lệ
-      const hasLedgerData = Array.isArray(data.ledgerData);
-      const isLegacyBackup =
-        Array.isArray(data.cellHistory) || typeof data.ledgerEntries === "string";
-      if (!hasLedgerData && !isLegacyBackup) {
-        showNotification('File không đúng định dạng sao lưu Cổ Nhơn!', 'error');
-        return;
-      }
-
-      const existingRaw = localStorage.getItem('coNhonData');
-      const hasExisting = existingRaw && JSON.parse(existingRaw).ledgerData?.length > 0;
-
-      const importCount = (data.ledgerData || []).length;
-      const backupInfo = data._backupDate ? ` (sao lưu ngày ${data._backupDate})` : '';
-
-      if (hasExisting) {
-        const choice = confirm(
-          `File chứa ${importCount} phiếu${backupInfo}.\n\n` +
-          `Máy này đang có ${ledgerData.length} phiếu.\n\n` +
-          `Bấm OK = THAY THẾ toàn bộ (xóa dữ liệu cũ)\n` +
-          `Bấm Cancel = HỦY, không nhập`
-        );
-        if (!choice) return;
-      } else {
-        if (!confirm(`Nhập ${importCount} phiếu${backupInfo}?`)) return;
-      }
-
-      toggleLoading(true);
-      localStorage.setItem('coNhonData', JSON.stringify(data));
-      if (data._profile?.id) {
-        localStorage.setItem("coNhonProfile", JSON.stringify(data._profile));
-      }
-      showNotification(`Đã nhập thành công ${importCount} phiếu!`);
-      setTimeout(() => location.reload(), 800);
-    } catch (err) {
-      showNotification('Lỗi đọc file: ' + err.message, 'error');
-    }
-  };
-  reader.readAsText(file);
+  if (event?.target) event.target.value = "";
+  showNotification(
+    "Khôi phục trực tiếp vào Supabase chưa được mở để tránh ghi đè dữ liệu.",
+    "error"
+  );
 }
 
 // Thêm hàm hiển thị thông báo

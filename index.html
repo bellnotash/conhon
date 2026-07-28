@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>
-  <body class="erp-body auth-locked">
+  <body class="erp-body auth-locked database-unavailable">
     <div class="loading-overlay" id="loadingOverlay"><div class="loading-spinner"></div></div>
     <div class="notification" id="notification"></div>
 
@@ -175,7 +175,7 @@
             <button type="button" class="view-session-btn" data-session="Chiều"><i class="fas fa-moon"></i> Chiều</button>
             <button type="button" class="view-session-btn" data-session=""><i class="fas fa-calendar-day"></i> Cả ngày</button>
           </div>
-          <div class="storage-usage" id="storageUsage">Dữ liệu: 0 KB</div>
+          <div class="storage-usage" id="storageUsage">Supabase: đang kết nối</div>
         </div>
 
         <main class="erp-main">
@@ -226,7 +226,7 @@
                 </div>
               </article>
               <article class="module-card module-tools">
-                <div class="module-card-head"><span><i class="fas fa-toolbox"></i></span><div><h3>Báo cáo & tiện ích</h3><p>Xuất báo cáo, sao lưu và quản lý dữ liệu cục bộ.</p></div></div>
+                <div class="module-card-head"><span><i class="fas fa-toolbox"></i></span><div><h3>Báo cáo & tiện ích</h3><p>Xuất báo cáo, sao lưu và quản lý dữ liệu Supabase.</p></div></div>
                 <div class="module-links">
                   <button type="button" data-route-link="tools-report"><span>Xuất báo cáo</span><i class="fas fa-chevron-right"></i></button>
                   <button type="button" data-route-link="tools-backup"><span>Sao lưu & khôi phục</span><i class="fas fa-chevron-right"></i></button>
@@ -421,7 +421,7 @@
           </section>
 
           <section class="app-page" data-route-page="tools-report">
-            <div class="page-intro"><div><h2>Xuất báo cáo</h2><p>Tạo báo cáo từ dữ liệu trên trình duyệt hiện tại.</p></div></div>
+            <div class="page-intro"><div><h2>Xuất báo cáo</h2><p>Tạo báo cáo từ dữ liệu của sổ đang tải từ Supabase.</p></div></div>
             <div class="utility-grid">
               <button class="utility-card" type="button" onclick="exportHistory()"><span class="utility-icon excel"><i class="fas fa-file-excel"></i></span><strong>Xuất Excel</strong><small>Lịch sử và tổng hợp dữ liệu</small></button>
               <button class="utility-card" type="button" onclick="exportAsImage()"><span class="utility-icon image"><i class="fas fa-image"></i></span><strong>Xuất ảnh</strong><small>Chụp bảng con vật đang xem</small></button>
@@ -429,28 +429,28 @@
           </section>
 
           <section class="app-page" data-route-page="tools-backup">
-            <div class="page-intro"><div><h2>Sao lưu & khôi phục</h2><p>Dùng để chuyển hoặc bảo vệ toàn bộ dữ liệu của trình duyệt này.</p></div></div>
+            <div class="page-intro"><div><h2>Sao lưu & khôi phục</h2><p>Tải bản sao dữ liệu hiện tại của sổ từ Supabase.</p></div></div>
             <div class="utility-grid">
-              <button class="utility-card" type="button" onclick="exportBackup()"><span class="utility-icon backup"><i class="fas fa-download"></i></span><strong>Tải bản sao lưu</strong><small>Bao gồm toàn bộ dữ liệu và hồ sơ sổ</small></button>
-              <button class="utility-card" type="button" onclick="document.getElementById('importFileInput').click()"><span class="utility-icon restore"><i class="fas fa-upload"></i></span><strong>Khôi phục dữ liệu</strong><small>Chọn tệp sao lưu .json</small></button>
+              <button class="utility-card" type="button" onclick="exportBackup()"><span class="utility-icon backup"><i class="fas fa-download"></i></span><strong>Tải bản sao Supabase</strong><small>Bao gồm phiếu, kết quả xổ, trả thưởng, công nợ và cấu hình</small></button>
+              <button class="utility-card" type="button" onclick="importBackup()"><span class="utility-icon restore"><i class="fas fa-upload"></i></span><strong>Khôi phục đang khóa</strong><small>Chưa cho phép ghi đè dữ liệu Supabase</small></button>
             </div>
-            <div class="warning-box"><i class="fas fa-triangle-exclamation"></i><div><strong>Hãy sao lưu trước khi đổi máy hoặc xóa dữ liệu trình duyệt.</strong><p>Dữ liệu web tĩnh không tự đồng bộ sang trình duyệt khác.</p></div></div>
+            <div class="warning-box"><i class="fas fa-triangle-exclamation"></i><div><strong>Supabase là nguồn dữ liệu chính của hệ thống.</strong><p>Bản sao JSON dùng để lưu trữ an toàn; chức năng khôi phục sẽ được mở sau khi có kiểm tra giao dịch và chống ghi đè.</p></div></div>
           </section>
 
           <section class="app-page" data-route-page="tools-profile">
             <div class="page-intro"><div><h2>Hồ sơ sổ</h2><p>Tên sổ giúp cấp trên nhận biết nguồn của phiếu tổng.</p></div></div>
             <div class="profile-page-card">
               <span class="profile-page-avatar"><i class="fas fa-address-card"></i></span>
-              <div><h3 id="profilePageName">Tên sổ chưa thiết lập</h3><p>Mã sổ được tạo riêng trên trình duyệt này.</p></div>
+              <div><h3 id="profilePageName">Tên sổ chưa thiết lập</h3><p>Tên và mã sổ được quản lý trong Supabase.</p></div>
               <button type="button" class="primary-action" onclick="openProfileModal()">Thiết lập hồ sơ</button>
             </div>
           </section>
 
           <section class="app-page" data-route-page="tools-data">
-            <div class="page-intro"><div><h2>Quản lý dữ liệu</h2><p>Kiểm tra dung lượng hoặc xóa toàn bộ dữ liệu cục bộ.</p></div></div>
+            <div class="page-intro"><div><h2>Quản lý dữ liệu</h2><p>Kiểm tra trạng thái dữ liệu của sổ trên Supabase.</p></div></div>
             <div class="danger-zone">
-              <div><span class="danger-icon"><i class="fas fa-database"></i></span><h3>Dữ liệu trên trình duyệt</h3><p>Nên tạo bản sao lưu trước khi thực hiện thao tác xóa.</p></div>
-              <button type="button" class="danger-action" onclick="clearAllData()"><i class="fas fa-trash-alt"></i> Xóa toàn bộ dữ liệu</button>
+              <div><span class="danger-icon"><i class="fas fa-database"></i></span><h3>Dữ liệu trên Supabase</h3><p>Trình duyệt không lưu bản dữ liệu nghiệp vụ thay thế và không được phép xóa toàn bộ database.</p></div>
+              <button type="button" class="danger-action" onclick="clearAllData()"><i class="fas fa-lock"></i> Xóa toàn bộ đang khóa</button>
             </div>
           </section>
         </main>
@@ -458,7 +458,6 @@
     </div>
 
     <input type="file" id="summaryImportInput" accept=".json" hidden onchange="importSessionSummary(event)" />
-    <input type="file" id="importFileInput" accept=".json" hidden onchange="importBackup(event)" />
 
     <div class="modal-overlay" id="editModal">
       <div class="modal-content">
