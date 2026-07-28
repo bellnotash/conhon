@@ -3081,6 +3081,40 @@ function getDebtEntriesAsOf(cutoffDate = activeViewDateTo) {
   );
 }
 
+function getDebtEntriesInRange(
+  startDate = activeViewDateFrom,
+  endDate = activeViewDateTo
+) {
+  return ledgerData.filter(
+    (entry) =>
+      isDirectEntry(entry) &&
+      entry.paymentType === "debt" &&
+      entry.date >= startDate &&
+      entry.date <= endDate &&
+      (!activeViewSession || entry.session === activeViewSession)
+  );
+}
+
+function compareDebtRowsByRecordedTime(a, b) {
+  const dateComparison = String(b.entry.date).localeCompare(
+    String(a.entry.date)
+  );
+  if (dateComparison !== 0) return dateComparison;
+
+  const sessionRank = { Sáng: 1, Chiều: 2 };
+  const sessionComparison =
+    (sessionRank[b.entry.session] || 0) -
+    (sessionRank[a.entry.session] || 0);
+  if (sessionComparison !== 0) return sessionComparison;
+
+  const createdAtComparison = String(b.entry.createdAt || "").localeCompare(
+    String(a.entry.createdAt || "")
+  );
+  if (createdAtComparison !== 0) return createdAtComparison;
+
+  return String(b.entry.id).localeCompare(String(a.entry.id));
+}
+
 let debtFilterTimer = null;
 function scheduleDebtFilterUpdate() {
   clearTimeout(debtFilterTimer);
@@ -3113,14 +3147,10 @@ function renderDebtList(entries) {
           : snapshot.status === statusFilter);
       return matchesSearch && matchesStatus;
     })
-    .sort((a, b) => {
-      if (a.snapshot.remaining !== b.snapshot.remaining) {
-        return b.snapshot.remaining - a.snapshot.remaining;
-      }
-      return String(b.entry.date).localeCompare(String(a.entry.date));
-    });
+    .sort(compareDebtRowsByRecordedTime);
   const pageKey = [
     dataRevision,
+    activeViewDateFrom,
     activeViewDateTo,
     activeViewSession || "all",
     search,
@@ -3645,7 +3675,9 @@ function renderFinanceOverviewInsights({
 
 function updateFinanceDashboard(route = getCurrentRoute()) {
   if (route === "finance-debt") {
-    renderDebtList(getDebtEntriesAsOf(activeViewDateTo));
+    renderDebtList(
+      getDebtEntriesInRange(activeViewDateFrom, activeViewDateTo)
+    );
     return;
   }
   if (!["finance-overview", "finance-source"].includes(route)) return;
